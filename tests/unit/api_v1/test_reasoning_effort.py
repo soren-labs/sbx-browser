@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import pytest
+from runtime.runner.effort import CANONICAL_EFFORTS
 from tests.unit.api_v1.conftest import create_agent, seed_account, wait_run, wait_sandbox
 from tests.unit.api_v1.test_verify import RecordingBackend, _argv_opt
 
@@ -43,7 +44,7 @@ def _init_exec(spy: RecordingBackend):
 
 
 class TestReasoningEffortValidation:
-    @pytest.mark.parametrize("level", ["low", "medium", "high"])
+    @pytest.mark.parametrize("level", list(CANONICAL_EFFORTS))
     def test_canonical_levels_accepted(self, client, auth, spy, level) -> None:
         body = create_agent(client, auth, agent={"provider": "codex", "reasoning_effort": level})
         assert body["agent"]["reasoning_effort"] == level
@@ -133,6 +134,6 @@ class TestReasoningEffortCapabilityReporting:
         assert resp.status_code == 200
         efforts = {m["provider"]: m["reasoning_efforts"] for m in resp.json()["models"]}
         for provider in PROVIDERS_EFFORT:
-            assert efforts[provider] == ["low", "medium", "high"]
+            assert efforts[provider] == list(CANONICAL_EFFORTS)
         for provider in PROVIDERS_NO_EFFORT:
             assert efforts[provider] == []

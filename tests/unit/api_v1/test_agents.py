@@ -200,8 +200,13 @@ class TestModelDefaults:
         [
             ("codex", "acct-codex-1", None, "gpt-5.3-codex"),
             ("devin", "acct-devin-1", ("swe-2-high", "swe-2-medium"), "swe-2-medium"),
-            ("antigravity", "acct-agy-1", ("gemini-3.8-flash-low",), "gemini-3.8-pro"),
-            ("grok", "acct-grok-1", ("grok-4.6",), "grok-4.7"),
+            (
+                "antigravity",
+                "acct-agy-1",
+                ("gemini-3.8-flash-low", "gemini-3.8-pro"),
+                "gemini-3.8-pro",
+            ),
+            ("grok", "acct-grok-1", ("grok-4.6", "grok-4.7"), "grok-4.7"),
         ],
     )
     def test_explicit_model_is_preserved(

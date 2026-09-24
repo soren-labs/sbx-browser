@@ -1,0 +1,11 @@
+{
+  "status": "Logged in",
+  "plan": "pro",
+  "families": ["swe-2", "swe-1.5"],
+  "models": [
+    {"id": "swe-2-medium", "display": "SWE-2 Medium", "family": "swe-2"},
+    {"id": "swe-2-high", "display": "SWE-2 High", "family": "swe-2"},
+    {"id": "swe-2-max", "display": "SWE-2 Max", "family": "swe-2"},
+    {"id": "swe-1.5", "display": "SWE-1.5", "family": "swe-1.5"}
+  ]
+}

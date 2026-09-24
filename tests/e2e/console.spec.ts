@@ -80,6 +80,39 @@ test.describe("web console against a real local /v1 control plane", () => {
     await expect(page.getByTestId("run")).toHaveCount(3);
   });
 
+  test("create agent links provider, account, model and effort (SOR-204)", async ({ page }) => {
+    await connect(page);
+    await page.goto("/#/agents/new");
+    await expect(page.getByTestId("page-title")).toBeVisible();
+    // Provider → Account: the seeded codex seat appears in the dynamic select.
+    const account = page.getByTestId("f-account");
+    await expect(account.locator("option")).not.toHaveCount(1);
+    await expect(account.locator("option").first()).toContainText("Auto");
+    // Pinning the account narrows the model list to its catalog.
+    const accountOptions = await account.locator("option").allInnerTexts();
+    const pinned = accountOptions.find((o) => o.includes("codex-1"));
+    expect(pinned, "seeded codex account in the Account select").toBeTruthy();
+    await account.selectOption({ label: pinned! });
+    // Provider → Model: catalog entries are selectable options.
+    const model = page.getByTestId("f-model");
+    await expect(model.locator("option")).not.toHaveCount(1);
+    // Model → Effort: codex exposes the full canonical ladder.
+    for (const v of ["none", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+      await expect(
+        page.locator(`[data-testid=f-effort] [data-value="${v}"]`),
+      ).toBeEnabled();
+    }
+    await page.locator('[data-testid=f-effort] [data-value="minimal"]').click();
+    await expect(page.getByTestId("request-preview")).toContainText(
+      '"reasoning_effort": "minimal"',
+    );
+    // A provider with no effort surface disables every level.
+    await page.locator('[data-provider="devin"]').click();
+    await expect(
+      page.locator('[data-testid=f-effort] [data-value="high"]'),
+    ).toBeDisabled();
+  });
+
   test("a failing run shows the structured run error", async ({ page }) => {
     await connect(page);
     await createAgent(page, "this one should fail", "failing agent");

@@ -1,0 +1,4 @@
+Anti-Gravity CLI 3.8.2 — checking subscription…
+Logged in as workspace agy-prod
+{"status": "Logged in", "plan": "team", "models": [{"id": "gemini-3.8-flash-low", "reasoning_efforts": ["none", "low", "high"], "default_effort": "low"}, {"id": "gemini-3.8-pro"}]}
+Done.

@@ -106,6 +106,10 @@ const enc = encodeURIComponent;
 export const api = {
   me: (key) => request("GET", "/v1/me", { key }),
   models: () => request("GET", "/v1/models"),
+  capabilities: () => request("GET", "/v1/capabilities"),
+  refreshCapabilities: () => request("POST", "/v1/capabilities/refresh"),
+  refreshAccountCapabilities: (id) =>
+    request("POST", `/v1/accounts/${enc(id)}/capabilities/refresh`),
 
   listAgents: (query) => request("GET", "/v1/agents", { query }),
   getAgent: (id) => request("GET", `/v1/agents/${enc(id)}`),

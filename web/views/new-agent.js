@@ -9,6 +9,9 @@ import { prompts } from "../lib/store.js";
 import { banner, button, card, codeBlock, field, pageHeader, segmented, toast, toggle } from "../lib/ui.js";
 
 const SHA = /^[0-9a-f]{40}$/;
+// Canonical reasoning-effort ladder (SOR-204). A level is offered only
+// when the resolved model's capability report exposes it.
+const CANONICAL_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const DEFAULT_SCHEMA = `{
   "type": "object",
   "properties": {
@@ -125,6 +128,11 @@ export function renderNewAgent({ route }) {
   const idempotencyKey = uuid();
   let models = [];
   let accounts = [];
+  // SOR-204: per-account capability catalog keyed by provider —
+  // {provider: [{id, label, status, running, max_concurrent, source,
+  // stale, plan, families, models[]}]}. Agents-scope, so non-admin users
+  // get the same Provider→Account→Model→Effort linking.
+  let capAccounts = {};
   let errors = {};
   let submitting = false;
 
@@ -210,6 +218,17 @@ export function renderNewAgent({ route }) {
     }
     const idle = num(f.idleTimeout);
     if (Number.isNaN(idle) || (idle != null && idle < 1)) e.idle = t("Must be a positive number of seconds.");
+    // SOR-204: reject combinations the capability catalog does not
+    // expose — the API refuses them too, but fail before submit.
+    const entries = modelEntries();
+    if (f.model) {
+      const sel = entries.find((m) => m.model === f.model);
+      if (entries.length && !sel) e.model = t("Model is not available on the selected account.");
+      else if (sel && !sel.available) e.model = t("Model is currently unavailable.");
+    }
+    if (f.effort && !effortLevels().includes(f.effort)) {
+      e.effort = t("Reasoning effort is not supported by this model.");
+    }
     return e;
   }
 
@@ -306,11 +325,82 @@ export function renderNewAgent({ route }) {
     return models.filter((m) => m.provider === provider);
   }
 
+  // ---- SOR-204: Provider → Account → Model → Effort chaining ----------
+
+  /** Accounts for a provider: capability catalog rows merged with the
+   * admin account list (same ids; caps already carry status/slots). */
+  function accountsFor(provider) {
+    const byId = new Map();
+    for (const a of capAccounts[provider] || []) byId.set(a.id, a);
+    for (const a of accounts.filter((x) => x.provider === provider)) {
+      const prior = byId.get(a.id) || {};
+      const merged = { ...prior, ...a };
+      // The admin list carries models as bare id strings; keep the
+      // capability row's normalized entries (efforts/display/availability)
+      // whenever both describe the same account.
+      if (Array.isArray(prior.models) && typeof prior.models[0] === "object") {
+        merged.models = prior.models;
+      }
+      byId.set(a.id, merged);
+    }
+    return [...byId.values()];
+  }
+
+  /** The pinned account's capability row, or null on Auto/unknown. */
+  function selectedAccountReport() {
+    if (!f.account || f.account === "auto") return null;
+    return accountsFor(f.provider).find((a) => a.id === f.account) || null;
+  }
+
+  /** Model entries for the current Provider+Account selection:
+   * {model, display, efforts, default_effort, available, free, stale}.
+   * A pinned account's own report is the truth; Auto falls back to the
+   * provider-wide /v1/models union. */
+  function modelEntries() {
+    const pinned = selectedAccountReport();
+    if (pinned) {
+      const free = pinned.status === "active" && (pinned.running ?? 0) < (pinned.max_concurrent ?? 1);
+      return (pinned.models || []).map((m) => {
+        // Capability rows carry dicts; a bare account row only has ids.
+        const entry = typeof m === "string" ? { model: m } : m || {};
+        return {
+          model: entry.model,
+          display: entry.display || entry.model,
+          efforts: entry.reasoning_efforts || [],
+          default_effort: entry.default_effort || null,
+          available: entry.availability !== "unavailable",
+          free: free && entry.availability !== "unavailable" ? 1 : 0,
+          stale: Boolean(pinned.stale),
+        };
+      });
+    }
+    return providerModels(f.provider).map((m) => ({
+      model: m.model,
+      display: m.display || m.model,
+      efforts: m.reasoning_efforts || [],
+      default_effort: m.default_effort || null,
+      available: (m.accounts_available || 0) > 0,
+      free: m.accounts_available || 0,
+      stale: Boolean(m.stale),
+    }));
+  }
+
+  /** Effort levels the resolved model exposes. No explicit model → the
+   * entry the server would pick (first available = report default). */
+  function effortLevels() {
+    const entries = modelEntries();
+    const sel = f.model
+      ? entries.find((m) => m.model === f.model)
+      : entries.find((m) => m.available) || entries[0];
+    return sel ? sel.efforts : [];
+  }
+
   function renderSections() {
-    const provModels = providerModels(f.provider);
-    const efforts = provModels[0]?.reasoning_efforts || [];
+    const entries = modelEntries();
+    const efforts = effortLevels();
     if (f.effort && !efforts.includes(f.effort)) f.effort = "";
-    const provAccounts = accounts.filter((a) => a.provider === f.provider);
+    if (f.model && entries.length && !entries.some((m) => m.model === f.model)) f.model = "";
+    const provAccounts = accountsFor(f.provider);
 
     const providerPicker = h(
       "div",
@@ -359,12 +449,31 @@ export function renderNewAgent({ route }) {
           refreshPreview();
         },
       },
-      h("option", { value: "" }, provModels.length ? t("Default ({model})", { model: provModels[0].model }) : t("Provider default")),
-      provModels.map((m) => h("option", { value: m.model, selected: f.model === m.model }, `${m.model} — ${t("{n} free", { n: m.accounts_available })}`)),
+      h("option", { value: "" }, entries.length ? t("Default ({model})", { model: (entries.find((m) => m.available) || entries[0]).model }) : t("Provider default")),
+      entries.map((m) =>
+        h(
+          "option",
+          {
+            value: m.model,
+            selected: f.model === m.model,
+            disabled: !m.available,
+            title: m.available ? (m.stale ? t("Reported by a stale capability snapshot") : null) : t("Unavailable on the selected account"),
+          },
+          `${m.display !== m.model ? `${m.display} (${m.model})` : m.model} — ${m.available ? t("{n} free", { n: m.free }) : t("unavailable")}`,
+        ),
+      ),
     );
 
     const effortControl = segmented(
-      [{ value: "", label: t("Default") }, ...["low", "medium", "high"].map((v) => ({ value: v, label: t(v), disabled: !efforts.includes(v), title: efforts.includes(v) ? null : t("Not supported by this provider") }))],
+      [
+        { value: "", label: t("Default") },
+        ...CANONICAL_EFFORTS.map((v) => ({
+          value: v,
+          label: t(v),
+          disabled: !efforts.includes(v),
+          title: efforts.includes(v) ? null : t("Not exposed by this model"),
+        })),
+      ],
       f.effort,
       (v) => {
         f.effort = v;
@@ -373,7 +482,7 @@ export function renderNewAgent({ route }) {
       { testid: "f-effort" },
     );
 
-    const accountControl = hasScope("admin")
+    const accountControl = provAccounts.length
       ? h(
           "select",
           {
@@ -381,11 +490,24 @@ export function renderNewAgent({ route }) {
             "data-testid": "f-account",
             onChange: (ev) => {
               f.account = ev.target.value;
+              // Account change re-scopes the model list and effort surface.
+              if (f.model) {
+                const next = accountsFor(f.provider).find((a) => a.id === f.account);
+                const ok = (next?.models || []).some((m) => m.model === f.model && m.availability !== "unavailable");
+                if (!ok) f.model = "";
+              }
+              renderSections();
               refreshPreview();
             },
           },
           h("option", { value: "auto" }, t("Auto — scheduler picks a free account")),
-          provAccounts.map((a) => h("option", { value: a.id, selected: f.account === a.id, disabled: a.status !== "active" }, `${a.label} (${a.id}) — ${a.running}/${a.max_concurrent} · ${a.status}`)),
+          provAccounts.map((a) =>
+            h(
+              "option",
+              { value: a.id, selected: f.account === a.id, disabled: a.status !== "active" },
+              `${a.label} (${a.id}) — ${a.running}/${a.max_concurrent} · ${a.status}${a.stale ? ` · ${t("stale")}` : ""}${a.plan ? ` · ${a.plan}` : ""}`,
+            ),
+          ),
         )
       : h("input", {
           class: "input mono",
@@ -407,10 +529,11 @@ export function renderNewAgent({ route }) {
         h(
           "div",
           { class: "fields-2" },
-          field(t("Model"), modelSelect, { htmlFor: "f-model" }),
+            field(t("Model"), modelSelect, { htmlFor: "f-model", error: errors.model }),
           field(t("Account"), accountControl, { hint: t("Pinning an account fails fast when it is busy instead of waiting.") }),
         ),
         field(t("Reasoning effort"), effortControl, {
+          error: errors.effort,
           hint: efforts.length ? t("Applies to every run of this agent.") : t("{provider} has no native effort setting.", { provider: providerLabel(f.provider) }),
         }),
       ),
@@ -704,6 +827,14 @@ export function renderNewAgent({ route }) {
       if (models.length && !providerModels(f.provider).length) f.provider = models[0].provider;
     } catch {
       models = [];
+    }
+    // SOR-204: capability catalog is agents-scoped, so every user gets
+    // account→model→effort linking (admin listAccounts only adds labels).
+    try {
+      const caps = await api.capabilities();
+      for (const p of caps.providers || []) capAccounts[p.provider] = p.accounts || [];
+    } catch {
+      capAccounts = {};
     }
     if (hasScope("admin")) {
       try {

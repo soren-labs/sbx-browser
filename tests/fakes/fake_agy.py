@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 from _fake_native import (
-    auth_check,
     install_term_handler,
+    models_catalog,
     rewrite_json,
     run_scenario,
     scan_argv,
@@ -39,10 +39,14 @@ def _rewrite_session(line: str, session_id: str) -> str:
 
 def main() -> None:
     install_term_handler()
-    auth_check(
+    # ``agy models`` is both the auth check and the SOR-204 capability
+    # discovery surface — emits the catalog JSON when logged in.
+    models_catalog(
         sys.argv[1:],
         ("models",),
         Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token",
+        "antigravity",
+        "FAKE_AGY_MODELS_JSON",
     )
     positionals, values, _seen = scan_argv(
         sys.argv[1:], bool_flags=_BOOL_FLAGS, value_flags=_VALUE_FLAGS

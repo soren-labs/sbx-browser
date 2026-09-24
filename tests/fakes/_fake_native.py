@@ -126,6 +126,89 @@ def append_hello(cwd: Path, content: str) -> None:
         fh.write(content)
 
 
+# Default capability catalogs for the SOR-204 ``<cli> models`` discovery
+# subcommand — what each provider account advertises when no
+# ``FAKE_<P>_MODELS_JSON`` override is set.
+DEFAULT_MODEL_CATALOGS: dict[str, dict] = {
+    "codex": {
+        "models": [
+            {"id": "gpt-5.6-luna"},
+            {"id": "gpt-5.3-codex"},
+        ],
+    },
+    "devin": {
+        "plan": "pro",
+        "families": ["swe-2", "swe-1.5"],
+        "models": [
+            {"id": "swe-2-medium"},
+            {"id": "swe-2-high"},
+            {"id": "swe-2-max"},
+            {"id": "swe-1.5"},
+        ],
+    },
+    "antigravity": {
+        "models": [
+            {"id": "gemini-3.8-flash-low"},
+            {"id": "gemini-3.8-pro"},
+        ],
+    },
+    "grok": {
+        "models": [
+            {"id": "grok-4.6"},
+            {"id": "grok-4.7"},
+        ],
+    },
+    "opencode": {
+        "models": [
+            {"id": "opencode/muse-spark-1.3-contributor-free", "free": True},
+            {"id": "opencode/claude-sonnet-4-5", "free": True},
+            {"id": "openai/gpt-5.6-luna"},
+        ],
+    },
+}
+
+
+def emit_catalog(provider: str, env_json: str) -> None:
+    """Print the provider's capability catalog JSON and exit 0.
+
+    The document always carries a ``status: "Logged in"`` marker so the
+    same output still satisfies ``classify_auth_output`` for the
+    marker-checked providers (grok/devin) — SOR-204 discovery and the
+    auth check share the ``models`` subcommand there.
+    """
+    raw = os.environ.get(env_json)
+    if raw:
+        print(raw)
+        sys.exit(0)
+    doc = {"status": "Logged in", **DEFAULT_MODEL_CATALOGS.get(provider, {"models": []})}
+    print(json.dumps(doc))
+    sys.exit(0)
+
+
+def models_catalog(
+    argv: list[str],
+    subcommand: tuple[str, ...],
+    credential: Path,
+    provider: str,
+    env_json: str,
+) -> None:
+    """Dispatch the SOR-204 ``<cli> models`` discovery subcommand.
+
+    Same logged-out surface as :func:`auth_check`; when the credential is
+    present the CLI emits the account's capability catalog as JSON.
+    """
+    if tuple(argv[: len(subcommand)]) != subcommand:
+        return
+    try:
+        ok = credential.is_file() and bool(credential.read_bytes().strip())
+    except OSError:
+        ok = False
+    if not ok:
+        print("Not logged in")
+        sys.exit(1)
+    emit_catalog(provider, env_json)
+
+
 def auth_check(argv: list[str], subcommand: tuple[str, ...], credential: Path) -> None:
     """Dispatch the provider's auth-check subcommand; no-op for other argv.
 

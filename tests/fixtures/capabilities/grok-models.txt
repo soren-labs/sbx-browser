@@ -1,0 +1,4 @@
+Available models for account grok-prod:
+  grok-4.6
+  grok-4.7
+  grok-4.6-mini

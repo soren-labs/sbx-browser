@@ -26,7 +26,15 @@ def _write_session(work: Path, **fields: object) -> None:
 
 class TestEffortModule:
     def test_canonical_order(self) -> None:
-        assert CANONICAL_EFFORTS == ("low", "medium", "high")
+        assert CANONICAL_EFFORTS == (
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        )
 
     @pytest.mark.parametrize("provider", ["codex", "antigravity", "grok"])
     def test_supported_providers(self, provider: str) -> None:

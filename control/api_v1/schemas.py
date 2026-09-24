@@ -12,7 +12,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 ProviderId = Literal["codex", "antigravity", "grok", "opencode", "devin"]
-ReasoningEffort = Literal["low", "medium", "high"]
+# Canonical effort ladder (SOR-204). Whether a level is actually honored
+# is a per-account/per-model capability decision — the schema accepts the
+# full ladder and create-time validation refuses unexposed levels.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 VALID_SCOPES = ("agents", "admin")
 
 USAGE_REQUIRED = ("input_tokens", "cached_input_tokens", "output_tokens")

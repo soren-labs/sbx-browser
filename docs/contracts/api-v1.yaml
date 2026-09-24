@@ -757,6 +757,76 @@ paths:
                       $ref: "#/components/schemas/Model"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/capabilities:
+    get:
+      tags: [meta]
+      summary: Per-account capability catalog (SOR-204)
+      description: |
+        Provider → account → model catalog used by the console's
+        Create Agent linking. Reads serve the last-good report
+        (CLI-discovered or the account's declared models) — they never
+        trigger discovery; refresh is the explicit admin endpoint.
+        `stale` marks reports past TTL or invalidated by a
+        credential/CLI change.
+      operationId: listCapabilities
+      responses:
+        "200":
+          description: Capability catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityCatalog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/capabilities/refresh:
+    post:
+      tags: [admin]
+      summary: Refresh every account's capability report (SOR-204)
+      description: |
+        Re-runs authenticated provider-CLI discovery for all accounts on
+        the deployment's enabled providers. Accounts whose discovery
+        fails keep their last-good report, marked `stale` with the
+        error recorded.
+      operationId: refreshCapabilities
+      responses:
+        "200":
+          description: Refreshed capability catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityCatalog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /v1/accounts/{id}/capabilities/refresh:
+    post:
+      tags: [admin]
+      summary: Refresh one account's capability report (SOR-204)
+      operationId: refreshAccountCapabilities
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The account's capability report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capabilities]
+                properties:
+                  capabilities:
+                    $ref: "#/components/schemas/AccountCapabilities"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /v1/me:
     get:
       tags: [meta]
@@ -1174,15 +1244,17 @@ components:
           type: string
         reasoning_effort:
           type: string
-          enum: [low, medium, high]
+          enum: [none, minimal, low, medium, high, xhigh, max]
           description: |
             SOR-179 canonical reasoning effort, agent-scoped: every run of
             the agent (first and follow-up turns, incl. provider resume)
-            executes under this level. It maps to each provider's native
-            effort surface; a provider/effort combination the provider
-            cannot honor is refused as `400 unsupported` at create time —
-            never silently ignored. `GET /v1/models` reports the levels
-            each provider honors.
+            executes under this level. SOR-204 widened the ladder to
+            `none|minimal|low|medium|high|xhigh|max`; whether a level is
+            honored is decided per resolved model from the account's
+            authenticated-CLI capability report — an unsupported
+            combination is refused as `400 unsupported` at create time,
+            never silently ignored. `GET /v1/models` and
+            `GET /v1/capabilities` report the levels each model exposes.
     CreateAgentRequest:
       type: object
       required: [prompt, agent]
@@ -1643,10 +1715,10 @@ components:
           type: string
         reasoning_effort:
           type: string
-          enum: [low, medium, high]
+          enum: [none, minimal, low, medium, high, xhigh, max]
           nullable: true
           description: |
-            SOR-179: the canonical reasoning effort declared at create
+            SOR-179/204: the canonical reasoning effort declared at create
             (inherited by every run), `null` when undeclared.
         status:
           $ref: "#/components/schemas/AgentStatus"
@@ -1738,10 +1810,10 @@ components:
           nullable: true
         reasoning_effort:
           type: string
-          enum: [low, medium, high]
+          enum: [none, minimal, low, medium, high, xhigh, max]
           nullable: true
           description: |
-            SOR-179: the effective canonical effort the run executed
+            SOR-179/204: the effective canonical effort the run executed
             under (the agent's declared level), `null` when undeclared.
         artifact_refs:
           type: array
@@ -1971,12 +2043,129 @@ components:
           type: array
           items:
             type: string
-            enum: [low, medium, high]
+            enum: [none, minimal, low, medium, high, xhigh, max]
           description: |
-            SOR-179: canonical reasoning-effort levels the provider
-            honors for this model. Empty means the provider has no
-            native effort surface — a declared `reasoning_effort` on
-            agent create is refused as `unsupported`, never ignored.
+            SOR-179/204: canonical reasoning-effort levels this model
+            exposes per the account's capability report. Empty means the
+            model has no effort surface — a declared `reasoning_effort`
+            on agent create is refused as `unsupported`, never ignored.
+        display:
+          type: string
+          description: Human-facing model name reported by the CLI.
+        family:
+          type: string
+          description: Model family (SOR-204), e.g. `swe-2`.
+        default_effort:
+          type: string
+          enum: [none, minimal, low, medium, high, xhigh, max]
+          nullable: true
+          description: Provider-reported default effort when set.
+        source:
+          type: string
+          enum: [cli, declared]
+          description: |
+            SOR-204 truth source: `cli` = authenticated provider CLI
+            discovery, `declared` = the account's declared model list.
+        stale:
+          type: boolean
+          description: |
+            Last-good report past its TTL or invalidated by a
+            credential/CLI change — still served, marked stale.
+    ModelCapability:
+      type: object
+      required: [model, display, family, aliases, reasoning_efforts, availability]
+      properties:
+        model:
+          type: string
+        display:
+          type: string
+        family:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        reasoning_efforts:
+          type: array
+          items:
+            type: string
+            enum: [none, minimal, low, medium, high, xhigh, max]
+        default_effort:
+          type: string
+          enum: [none, minimal, low, medium, high, xhigh, max]
+          nullable: true
+        availability:
+          type: string
+          enum: [available, unavailable]
+        free:
+          type: boolean
+          description: Zero-cost tier (e.g. OpenCode Zen free models).
+    AccountCapabilities:
+      type: object
+      required: [account_id, provider, source, refreshed_at, stale, models]
+      properties:
+        account_id:
+          type: string
+        provider:
+          $ref: "#/components/schemas/ProviderId"
+        source:
+          type: string
+          enum: [cli, declared]
+        refreshed_at:
+          type: string
+          format: date-time
+          nullable: true
+        stale:
+          type: boolean
+        plan:
+          type: string
+          nullable: true
+          description: Account subscription/tier when the CLI reports it.
+        families:
+          type: array
+          items:
+            type: string
+        cli_version:
+          type: string
+          nullable: true
+        error:
+          type: string
+          nullable: true
+          description: Discovery error recorded on a last-good report.
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCapability"
+    CapabilityCatalog:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            required: [provider, accounts]
+            properties:
+              provider:
+                $ref: "#/components/schemas/ProviderId"
+              accounts:
+                type: array
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/AccountCapabilities"
+                    - type: object
+                      properties:
+                        id:
+                          type: string
+                          description: Same id as `account_id`.
+                        label:
+                          type: string
+                        status:
+                          $ref: "#/components/schemas/AccountStatus"
+                        running:
+                          type: integer
+                        max_concurrent:
+                          type: integer
     Me:
       type: object
       required: [key_id, scopes]

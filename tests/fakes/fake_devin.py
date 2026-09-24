@@ -20,6 +20,7 @@ from pathlib import Path
 from _fake_native import (
     auth_check,
     install_term_handler,
+    models_catalog,
     rewrite_json,
     run_scenario,
     scan_argv,
@@ -47,6 +48,15 @@ def main() -> None:
         sys.argv[1:],
         ("auth", "status"),
         data_home / "devin" / "credentials.toml",
+    )
+    # SOR-204 discovery: ``devin models`` emits the account catalog (the
+    # fake's default carries the swe-2 medium/high/max tier + families).
+    models_catalog(
+        sys.argv[1:],
+        ("models",),
+        data_home / "devin" / "credentials.toml",
+        "devin",
+        "FAKE_DEVIN_MODELS_JSON",
     )
     positionals, values, _seen = scan_argv(
         sys.argv[1:], bool_flags=_BOOL_FLAGS, value_flags=_VALUE_FLAGS

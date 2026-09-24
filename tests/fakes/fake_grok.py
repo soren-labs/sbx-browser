@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 from _fake_native import (
-    auth_check,
     install_term_handler,
+    models_catalog,
     rewrite_json,
     run_scenario,
     scan_argv,
@@ -37,10 +37,15 @@ def _rewrite_session(line: str, session_id: str) -> str:
 
 def main() -> None:
     install_term_handler()
-    auth_check(
+    # ``grok models`` doubles as auth check and SOR-204 discovery — the
+    # catalog JSON keeps the ``Logged in`` marker classify_auth_output
+    # requires for grok.
+    models_catalog(
         sys.argv[1:],
         ("models",),
         Path.home() / ".grok" / "auth.json",
+        "grok",
+        "FAKE_GROK_MODELS_JSON",
     )
     positionals, values, seen = scan_argv(
         sys.argv[1:], bool_flags=_BOOL_FLAGS, value_flags=_VALUE_FLAGS

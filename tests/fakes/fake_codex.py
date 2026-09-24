@@ -18,6 +18,11 @@ import sys
 import time
 from pathlib import Path
 
+# The other fake CLIs rely on script-mode sys.path[0]; codex_spy.py exec's
+# this file via runpy, which doesn't add the directory — pin it explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _fake_native import emit_catalog  # noqa: E402
+
 DEFAULT_THREAD_ID = "01a09a36-b4fb-7f90-b96e-42adeefa05e0"
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "events"
 
@@ -83,12 +88,32 @@ def _auth_status() -> None:
     sys.exit(1)
 
 
+def _models() -> None:
+    """``codex models`` — SOR-204 capability discovery catalog.
+
+    Reflects the restored credential file only (same check as
+    ``login status``), then emits the catalog JSON.
+    """
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    auth = home / "auth.json"
+    try:
+        ok = auth.is_file() and isinstance(json.loads(auth.read_text()), dict)
+    except (OSError, json.JSONDecodeError):
+        ok = False
+    if not ok:
+        print("Not logged in")
+        sys.exit(1)
+    emit_catalog("codex", "FAKE_CODEX_MODELS_JSON")
+
+
 def parse_argv(argv: list[str]) -> dict:
     tokens = list(argv[1:])
     if tokens and Path(tokens[0]).name in {"codex", "fake_codex.py"}:
         tokens = tokens[1:]
     if tokens[:2] == ["login", "status"]:
         _auth_status()
+    if tokens[:1] == ["models"]:
+        _models()
     if not tokens or tokens[0] != "exec":
         print("expected: exec [--json] ... [resume] [PROMPT]", file=sys.stderr)
         sys.exit(2)

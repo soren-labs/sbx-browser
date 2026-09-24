@@ -40,7 +40,7 @@ def _app_ops(app) -> set[tuple[str, str]]:
 
 def test_contract_routes_all_registered(v1_env) -> None:
     contract_ops = _contract_ops()
-    assert len(contract_ops) == 36  # 29 paths, some with two methods
+    assert len(contract_ops) == 39  # 32 paths, some with two methods
     app_ops = _app_ops(v1_env.app)
     missing = contract_ops - app_ops
     assert not missing, f"contract routes not implemented: {sorted(missing)}"

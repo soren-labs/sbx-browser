@@ -24,7 +24,12 @@ from typing import Any
 from fastapi import Depends, Header, Request
 from fastapi.responses import Response
 from runtime.runner.contract import STATUS_SKIPPED, ContractError, normalize_contract
-from runtime.runner.effort import effort_error, normalize_effort, supported_efforts
+from runtime.runner.effort import (
+    CANONICAL_EFFORTS,
+    effort_error,
+    normalize_effort,
+    supported_efforts,
+)
 
 from control.api_v1 import router
 from control.api_v1.bootstrap import PROVIDER_DEFAULT_MODELS
@@ -34,6 +39,7 @@ from control.api_v1.deps import (
     agents_key,
     api_key,
     get_artifact_store,
+    get_capabilities,
     get_github_app,
     get_handoffs,
     get_key_store,
@@ -81,6 +87,7 @@ from control.artifacts import (
     ArtifactSecretError,
     manifest_to_dict,
 )
+from control.capabilities import ModelCapability, infer_family
 from control.compute import ComputeError, ComputeSpec, compute_for_record, resolve_compute
 from control.config import TERMINAL_STATUSES, selected_providers
 from control.credsync import TAG_CRED_RUN_FP
@@ -876,6 +883,7 @@ def create_agent(
     artifacts: Any = Depends(get_artifact_store),
     workflows: WorkflowService = Depends(get_workflow_service),
     resources_registry: Any = Depends(get_resources),
+    capabilities: Any = Depends(get_capabilities),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     """Create an agent and queue its first run (SOR-82 A2).
@@ -983,6 +991,7 @@ def create_agent(
             resources=resources,
             compute=compute,
             reasoning_effort=effort,
+            capabilities=capabilities,
         )
     except Exception:
         if owned is not None:
@@ -1021,6 +1030,7 @@ def _create_agent_once(
     resources: dict[str, Any] | None = None,
     compute: ComputeSpec | None = None,
     reasoning_effort: str | None = None,
+    capabilities: Any = None,
 ) -> dict[str, Any]:
     provider = body.agent.provider
     requested = body.agent.account_id or "auto"
@@ -1056,7 +1066,22 @@ def _create_agent_once(
     secret_name = None
     if account is not None:
         secret_name = account.secret_name or None
-    model = body.agent.model or _default_model(provider, account)
+
+    # SOR-204: model/effort truth comes from the account's capability
+    # catalog (CLI-discovered, else its declared models). A non-empty
+    # catalog is proof — unknown models and unexposed effort levels are
+    # refused before any sandbox work; an empty catalog proves nothing
+    # and falls back to the pre-SOR-204 passthrough.
+    model = None
+    if hasattr(capabilities, "resolve_model"):
+        model, refusal = capabilities.resolve_model(account, body.agent.model)
+        if refusal is not None:
+            raise V1ApiError(400, "unsupported", refusal)
+        effort_refusal = capabilities.effort_refusal(provider, account, reasoning_effort, model)
+        if effort_refusal is not None:
+            raise V1ApiError(400, "unsupported", effort_refusal)
+    if model is None:
+        model = body.agent.model or _default_model(provider, account)
 
     try:
         session_id = plane.open_session(
@@ -1897,37 +1922,149 @@ def get_agent_usage(
 def list_models(
     key: ApiKey = Depends(agents_key),
     registry: AccountRegistry = Depends(get_registry),
+    capabilities: Any = Depends(get_capabilities),
 ) -> dict[str, Any]:
-    """Advertised models come from account declarations; availability counts
-    active accounts with a free slot that list the model."""
+    """Model catalog per provider.
+
+    SOR-204: capability truth comes from the account's authenticated-CLI
+    discovery report when one exists (``source: cli``); otherwise from the
+    account's declared ``models`` (``source: declared``). ``stale`` marks a
+    last-good report past its TTL or invalidated by a credential/CLI
+    change; it is still served rather than dropped.
+    ``accounts_available`` counts active accounts with a free slot whose
+    report advertises the model as ``available``.
+    """
     enabled = frozenset(selected_providers())
-    counts: dict[tuple[str, str], int] = {}
+    # ``capabilities`` is a real CapabilityService under DI; direct calls in
+    # tests pass a bare ``Depends`` marker — treat anything without a catalog
+    # as "no capability service" and fall back to declared models.
+    catalog = capabilities.catalog(providers=enabled) if hasattr(capabilities, "catalog") else {}
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
     for account in registry.list():
         # Durable registries can retain accounts from an earlier deployment
         # with a wider provider set. Never advertise a provider whose image
         # and credential mounts are intentionally absent from this deploy.
         if account.provider not in enabled:
             continue
-        free = (
+        free_slot = (
             account.status == "active"
             and _running_or_zero(registry, account.id) < account.max_concurrent
         )
-        for model in account.models:
-            key_ = (account.provider, model)
-            counts[key_] = counts.get(key_, 0) + (1 if free else 0)
+        report = catalog.get(account.id)
+        if report is not None and report.models:
+            entries = report.models
+            source = report.source
+            stale = report.stale
+        else:
+            entries = tuple(
+                ModelCapability(
+                    model=m,
+                    display=m,
+                    family=infer_family(m),
+                    reasoning_efforts=supported_efforts(account.provider),
+                )
+                for m in account.models
+            )
+            source = "declared"
+            stale = False
+        for entry in entries:
+            row = rows.setdefault(
+                (account.provider, entry.model),
+                {
+                    "provider": account.provider,
+                    "model": entry.model,
+                    "display": entry.display,
+                    "family": entry.family,
+                    "default_effort": entry.default_effort,
+                    "accounts_available": 0,
+                    "_efforts": set(entry.reasoning_efforts),
+                    "source": source,
+                    "stale": stale,
+                },
+            )
+            if free_slot and entry.availability == "available":
+                row["accounts_available"] += 1
+            row["_efforts"].update(entry.reasoning_efforts)
+            if row["default_effort"] is None:
+                row["default_effort"] = entry.default_effort
+            if source == "cli":
+                row["source"] = "cli"
+            row["stale"] = row["stale"] or stale
+    canonical = {level: i for i, level in enumerate(CANONICAL_EFFORTS)}
     models = [
         {
-            "provider": provider,
-            "model": model,
-            "accounts_available": count,
-            # SOR-179: the canonical effort levels this provider honors
-            # (empty when it has no native effort surface — a declared
-            # effort is refused at create time, never silently ignored).
-            "reasoning_efforts": list(supported_efforts(provider)),
+            **{k: v for k, v in row.items() if k != "_efforts"},
+            # SOR-179/204: canonical effort levels reported for this model
+            # (empty when it has no effort surface — a declared
+            # ``reasoning_effort`` on create is refused ``unsupported``).
+            "reasoning_efforts": sorted(row["_efforts"], key=canonical.get),
         }
-        for (provider, model), count in sorted(counts.items())
+        for (provider, model), row in sorted(rows.items())
     ]
     return {"models": models}
+
+
+def _capabilities_payload(registry: AccountRegistry, capabilities: Any) -> dict[str, Any]:
+    """``GET /v1/capabilities`` body: provider → account → model catalog.
+
+    Only deploy-selected providers are listed; account rows carry the
+    normalized report (source / refreshed_at / stale / plan / families /
+    models) plus scheduler-visible fields the UI needs for linking.
+    """
+    enabled = frozenset(selected_providers())
+    by_provider: dict[str, list[dict[str, Any]]] = {}
+    for account in registry.list():
+        if account.provider not in enabled:
+            continue
+        report = capabilities.report(account) if hasattr(capabilities, "report") else None
+        row = {
+            "id": account.id,
+            "provider": account.provider,
+            "label": account.label,
+            "status": account.status,
+            "running": _running_or_zero(registry, account.id),
+            "max_concurrent": account.max_concurrent,
+            "source": report.source if report else "declared",
+            "refreshed_at": report.refreshed_at if report else None,
+            "stale": bool(report.stale) if report else False,
+            "plan": report.plan if report else None,
+            "families": list(report.families) if report else [],
+            "error": report.error if report else None,
+            "models": [m.to_dict() for m in report.models] if report else [],
+        }
+        by_provider.setdefault(account.provider, []).append(row)
+    return {
+        "providers": [
+            {"provider": provider, "accounts": rows}
+            for provider, rows in sorted(by_provider.items())
+        ]
+    }
+
+
+@router.get("/capabilities")
+def list_capabilities(
+    key: ApiKey = Depends(agents_key),
+    registry: AccountRegistry = Depends(get_registry),
+    capabilities: Any = Depends(get_capabilities),
+) -> dict[str, Any]:
+    """SOR-204: last-good capability catalog for Provider→Account→Model
+    linking. Never triggers discovery — reads serve cached/declared
+    reports; refresh is explicit (admin)."""
+    return _capabilities_payload(registry, capabilities)
+
+
+@router.post("/capabilities/refresh")
+def refresh_capabilities(
+    key: ApiKey = Depends(admin_key),
+    registry: AccountRegistry = Depends(get_registry),
+    capabilities: Any = Depends(get_capabilities),
+) -> dict[str, Any]:
+    """SOR-204: re-run authenticated-CLI discovery for every account on the
+    enabled providers. Failed accounts keep their last-good report with
+    the error recorded on it."""
+    if hasattr(capabilities, "refresh_all"):
+        capabilities.refresh_all(providers=selected_providers())
+    return _capabilities_payload(registry, capabilities)
 
 
 @router.get("/me")
@@ -2000,10 +2137,31 @@ def delete_account(
     account_id: str,
     key: ApiKey = Depends(admin_key),
     registry: AccountRegistry = Depends(get_registry),
+    capabilities: Any = Depends(get_capabilities),
 ) -> Response:
     _registry_account(registry, account_id)
     registry.remove(account_id)
+    if hasattr(capabilities, "invalidate"):
+        capabilities.invalidate(account_id)
     return Response(status_code=204)
+
+
+@router.post("/accounts/{account_id}/capabilities/refresh")
+def refresh_account_capabilities(
+    account_id: str,
+    key: ApiKey = Depends(admin_key),
+    registry: AccountRegistry = Depends(get_registry),
+    capabilities: Any = Depends(get_capabilities),
+) -> dict[str, Any]:
+    """SOR-204: re-run authenticated-CLI discovery for one account.
+
+    Returns the fresh report (``source: cli``) on success; on failure the
+    last-good report is returned with ``stale: true`` and the discovery
+    error recorded — the catalog never drops to nothing.
+    """
+    account = _registry_account(registry, account_id)
+    report = capabilities.refresh(account) if hasattr(capabilities, "refresh") else None
+    return {"capabilities": report.to_dict() if report else None}
 
 
 @router.post("/accounts/{account_id}/verify")

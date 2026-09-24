@@ -1,0 +1,14 @@
+{
+  "status": "Logged in",
+  "plan": "zen-free",
+  "models": [
+    {
+      "id": "opencode/muse-spark-1.3-contributor-free",
+      "display": "Muse Spark 1.3 (contributor free)",
+      "free": true
+    },
+    {"id": "opencode/claude-sonnet-4-5", "free": true},
+    {"id": "openai/gpt-5.6-luna", "aliases": ["gpt-5.6-luna"]},
+    {"id": "openai/gpt-5.6-luna-mini", "availability": "unavailable"}
+  ]
+}

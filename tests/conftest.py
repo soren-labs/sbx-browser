@@ -94,6 +94,7 @@ _CLOUD_KEYS = frozenset(
         "SBX_DEVIN_VERSION",
         "SBX_OPENCODE_VERSION",
         "SBX_AGY_VERSION",
+        "SBX_ANTIGRAVITY_VERSION",
         "SBX_GROK_VERSION",
         "SBX_NPM_REGISTRY",
         "SBX_DEVIN_BASE_URL",
@@ -102,6 +103,17 @@ _CLOUD_KEYS = frozenset(
         # Build-host binary overrides (agy/grok) are per-test inputs too.
         "SBX_AGY_BIN",
         "SBX_GROK_BIN",
+        # SOR-204 capability catalog knobs — ambient values must never
+        # pick a store/TTL/CLI-version axis in tests.
+        "SBX_CAPABILITY_STORE_DIR",
+        "SBX_CAPABILITY_TTL_S",
+        "SBX_CAPABILITIES_DICT",
+        "SBX_CLI_VERSIONS",
+        "SBX_CODEX_DISCOVERY_ARGV",
+        "SBX_DEVIN_DISCOVERY_ARGV",
+        "SBX_ANTIGRAVITY_DISCOVERY_ARGV",
+        "SBX_GROK_DISCOVERY_ARGV",
+        "SBX_OPENCODE_DISCOVERY_ARGV",
     }
 )
 # Deliberately NOT scrubbed: SBX_V1_API_KEY / SBX_V1_BASE_URL /

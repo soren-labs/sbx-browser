@@ -1,4 +1,4 @@
-"""SOR-179 canonical ``reasoning_effort``: levels and provider capability.
+"""SOR-179/SOR-204 canonical ``reasoning_effort``: levels and provider capability.
 
 One canonical request field — ``reasoning_effort`` on agent create — is
 mapped onto each provider CLI's native effort surface at turn time:
@@ -12,17 +12,34 @@ mapped onto each provider CLI's native effort surface at turn time:
   versions (``runtime/packages.txt`` / SOR-175 lock). A declared effort is
   refused — ``unsupported`` at ``POST /v1/agents``, a failed ``runner init``
   as the in-sandbox backstop — never silently ignored.
+
+SOR-204 widened the canonical ladder to the full seven levels
+(``none``/``minimal``/``low``/``medium``/``high``/``xhigh``/``max``). The
+provider surface carries every level through to the CLI; the *model-level*
+truth — which levels a given model actually exposes — comes from the
+capability catalog (``control.capabilities``), discovered via the
+authenticated provider CLI and enforced at create time.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-CANONICAL_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
+CANONICAL_EFFORTS: tuple[str, ...] = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
 
-# Providers that can honor a declared effort natively for every canonical
-# level. Providers absent from the set (or missing a level) refuse the
-# request explicitly instead of running with a silently dropped effort.
+# Providers whose native surface can carry a declared effort for every
+# canonical level. Providers absent from the set (or missing a level)
+# refuse the request explicitly instead of running with a silently dropped
+# effort. Per-model exposure narrows this further via the capability
+# catalog — a level the model does not expose is refused at create time.
 SUPPORTED_EFFORTS: dict[str, frozenset[str]] = {
     "codex": frozenset(CANONICAL_EFFORTS),
     "antigravity": frozenset(CANONICAL_EFFORTS),

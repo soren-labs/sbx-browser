@@ -16,6 +16,7 @@ from pathlib import Path
 from _fake_native import (
     auth_check,
     install_term_handler,
+    models_catalog,
     rewrite_json,
     run_scenario,
     scan_argv,
@@ -46,6 +47,15 @@ def main() -> None:
         sys.argv[1:],
         ("auth", "list"),
         data_home / "opencode" / "auth.json",
+    )
+    # SOR-204 discovery: ``opencode models`` enumerates the Zen catalog
+    # (muse-spark-1.3-contributor-free + other free models by default).
+    models_catalog(
+        sys.argv[1:],
+        ("models",),
+        data_home / "opencode" / "auth.json",
+        "opencode",
+        "FAKE_OPENCODE_MODELS_JSON",
     )
     positionals, values, seen = scan_argv(
         sys.argv[1:],

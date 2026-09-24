@@ -26,7 +26,7 @@ Sandbox 内驱动 agent CLI 会话的进程入口。可执行文件名约定为 
 
 ### `runner init --provider P --model M [--auth auth_json|provider] [--reasoning-effort E]`
 
-SOR-179：`--reasoning-effort` 为可选的规范 effort 级别（`low|medium|high`），记入 `session.json.reasoning_effort` 并作用于该 session 的每一轮（首轮与 resume 轮）。provider 无法兑现的组合（如 `opencode` / `devin`）由 init 显式失败（退出码 2），绝不静默忽略；规范级别之外的取值同样失败。原生映射：codex 写入 `config.toml` 的 `model_reasoning_effort`（首轮与 resume 均生效）；antigravity / grok 由 adapter 在 argv 传 `--effort <E>`。
+SOR-179：`--reasoning-effort` 为可选的规范 effort 级别（SOR-204 扩展为 `none|minimal|low|medium|high|xhigh|max`），记入 `session.json.reasoning_effort` 并作用于该 session 的每一轮（首轮与 resume 轮）。provider 无法兑现的组合由 init 显式失败（退出码 2），绝不静默忽略；规范级别之外的取值同样失败。是否真正可用由账号的 capability 目录决定（SOR-204），并非全部级别对每个 provider/模型都开放。原生映射：codex 写入 `config.toml` 的 `model_reasoning_effort`（首轮与 resume 均生效）；antigravity / grok 由 adapter 在 argv 传 `--effort <E>`。
 
 1. 创建 `$HOME`（=`$SBX_WORK/home`）与 `$CODEX_HOME`（=`$HOME/.codex`），写入 `config.toml`（最小内容）：
 

@@ -7,6 +7,7 @@ inject real implementations; absent attributes get in-memory defaults from
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any
 
@@ -237,6 +238,40 @@ def get_github_app(request: Request) -> Any:
 
         service = github_app.default_service()
         request.app.state.github_app = service
+    return service
+
+
+def get_capabilities(request: Request) -> Any:
+    """Capability service (SOR-204): discovered model/effort catalog.
+
+    ``app.state.capabilities`` when a test/deploy injects one, else a
+    ``CapabilityService`` over the bound registry with a sandbox probe
+    bound to the plane's backend + runner command and the deployment's
+    capability store.
+    """
+    service = getattr(request.app.state, "capabilities", None)
+    if service is None:
+        from control.capabilities import (
+            CapabilityService,
+            SandboxCapabilityProbe,
+            select_capability_store,
+        )
+
+        plane = getattr(request.app.state, "plane", None)
+        backend = getattr(plane, "backend", None)
+        runner_cmd = getattr(plane, "runner_cmd", None)
+        probe = (
+            SandboxCapabilityProbe(backend, runner_cmd, bin_env=os.environ)
+            if backend is not None and runner_cmd
+            else None
+        )
+        service = CapabilityService(
+            get_registry(request),
+            store=select_capability_store(),
+            probe=probe,
+            env=os.environ,
+        )
+        request.app.state.capabilities = service
     return service
 
 
