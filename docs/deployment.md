@@ -34,6 +34,12 @@ prints the two values clients need: `SBX_BASE_URL` and a `sbx_<key>` API key
 
 ## What gets created
 
+Product auth additionally requires an external PostgreSQL database. Mount a Modal
+Secret containing `DATABASE_URL` using `SBX_AUTH_DATABASE_SECRET_NAME` or
+`secrets.auth_database`; never bake the URL into deploy env. See
+[auth persistence](auth-persistence.md) for setup and rollout. Bootstrap remains
+operator-only; newly issued product API keys persist across redeployments.
+
 | Resource | Default name | Override |
 | --- | --- | --- |
 | Modal App (ASGI + reaper cron `*/5`) | `sbx-control` | `SBX_MODAL_APP_NAME` |

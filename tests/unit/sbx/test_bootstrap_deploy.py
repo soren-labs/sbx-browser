@@ -59,6 +59,59 @@ def test_deploy_happy_path(tmp_path) -> None:
     assert report.key_created and not report.key_rotated
 
 
+def test_deploy_requires_configured_auth_database_secret(tmp_path) -> None:
+    plane = FakePlane()
+    config = BootstrapConfig(auth_database_secret="sbx-auth-database")
+    with pytest.raises(BootstrapError) as error:
+        _deploy(tmp_path, plane, config=config)
+    assert error.value.code == "auth_database_secret_missing"
+    assert plane.image_calls == []
+    assert plane.apps == {}
+
+
+def test_deploy_forwards_database_secret_name_without_url(tmp_path) -> None:
+    plane = FakePlane()
+    plane.secrets["sbx-auth-database"] = {"DATABASE_URL": "REDACTED"}
+    report, _, _ = _deploy(
+        tmp_path, plane, config=BootstrapConfig(auth_database_secret="sbx-auth-database")
+    )
+    assert report.base_url
+    assert plane.deploy_env["SBX_AUTH_DATABASE_SECRET_NAME"] == "sbx-auth-database"
+    assert "DATABASE_URL" not in plane.deploy_env
+
+
+@pytest.mark.parametrize("shared", ["sbx-v1-bootstrap", "tenant-bootstrap"])
+def test_deploy_rejects_shared_auth_secret_before_bootstrap_rotation(tmp_path, shared) -> None:
+    plane = FakePlane()
+    before = {"SBX_V1_BOOTSTRAP_KEY": "REDACTED", "DATABASE_URL": "REDACTED"}
+    plane.secrets[shared] = dict(before)
+    env = make_env(
+        tmp_path,
+        {"SBX_AUTH_DATABASE_SECRET_NAME": shared, "SBX_V1_BOOTSTRAP_SECRET_NAME": shared},
+    )
+    assert not key_path(env).exists()  # a missing local key would trigger rotation
+    with pytest.raises(BootstrapError) as error:
+        _deploy(tmp_path, plane, env=env)
+    assert error.value.code == "auth_database_secret_conflict"
+    assert plane.secrets[shared] == before
+    assert plane.secret_create_calls == 0
+    assert plane.deploy_calls == 0
+    assert plane.image_calls == []
+    assert not key_path(env).exists()
+
+
+def test_bootstrap_rotation_preserves_separate_auth_database_secret(tmp_path) -> None:
+    plane = FakePlane()
+    plane.secrets["sbx-v1-bootstrap"] = {"SBX_V1_BOOTSTRAP_KEY": "REDACTED"}
+    plane.secrets["sbx-auth-database"] = {"DATABASE_URL": "REDACTED"}
+    report, env, _ = _deploy(
+        tmp_path, plane, config=BootstrapConfig(auth_database_secret="sbx-auth-database")
+    )
+    assert report.key_rotated
+    assert plane.secrets["sbx-auth-database"] == {"DATABASE_URL": "REDACTED"}
+    assert plane.secrets["sbx-v1-bootstrap"] == {"SBX_V1_BOOTSTRAP_KEY": read_key(key_path(env))}
+
+
 def test_deploy_is_idempotent(tmp_path) -> None:
     plane = FakePlane()
     plane.secrets["sbx-codex-auth"] = {"CODEX_AUTH_JSON": "REDACTED"}

@@ -17,13 +17,13 @@ from control.api_v1.errors import V1ApiError
 from control.api_v1.lifecycle import RUN_TERMINAL, RunStateStore
 from control.api_v1.state import (
     InMemoryAccountRegistry,
-    InMemoryApiKeyStore,
     V1State,
 )
 from control.api_v1.workflows import WorkflowService
 from control.artifact_ops import HandoffStoreView
 from control.artifacts import InMemoryArtifactStore
 from control.auth_bearer import bearer_scheme, bearer_token, has_scope, lookup_key
+from control.auth_store import configure_auth
 from control.credsync import credential_rotated
 from control.handoff import HandoffService
 from control.ports import AccountRegistry, ApiKey, ApiKeyStore, Scheduler
@@ -85,8 +85,8 @@ def get_scheduler(request: Request) -> Scheduler:
 def get_key_store(request: Request) -> ApiKeyStore:
     store = getattr(request.app.state, "api_key_store", None)
     if store is None:
-        store = InMemoryApiKeyStore()
-        request.app.state.api_key_store = store
+        configure_auth(request.app)
+        store = request.app.state.api_key_store
     return store
 
 

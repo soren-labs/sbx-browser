@@ -51,6 +51,7 @@ CONTROL_IMAGE = (
         # GitHub App JWT signing (control.github_app) needs PyJWT's crypto
         # extra for RS256 — same constraint as pyproject.toml.
         "pyjwt[crypto]>=2.10.0",
+        "psycopg[binary]>=3.2.0,<4",
     )
     # SOR-211 + SOR-266: ship the V2 Session Console build (``console/dist``)
     # with the control plane — the deployed app's URL serves it at "/" on

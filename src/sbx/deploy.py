@@ -850,6 +850,12 @@ def deploy(
     github_app_step = _require_github_app_secret(config, existing_secrets)
     if github_app_step is not None:
         steps.append(github_app_step)
+    if config.auth_database_secret and config.auth_database_secret not in existing_secrets:
+        raise BootstrapError(
+            "configured auth database Secret is missing; create a Modal Secret holding "
+            "DATABASE_URL before deploying",
+            code="auth_database_secret_missing",
+        )
 
     # SOR-175: resolve + freeze provider CLI versions once, before any
     # write. SOR-210: a platform-only deploy (no providers, no explicit
