@@ -52,6 +52,8 @@ from control.api_v1.deps import (
     get_v1_state,
     get_workflow_service,
     get_workspaces,
+    owner_visible,
+    require_artifact_owner,
 )
 from control.api_v1.errors import V1ApiError, not_found
 from control.api_v1.lifecycle import (
@@ -93,6 +95,7 @@ from control.artifacts import (
     manifest_to_dict,
     page_manifests,
 )
+from control.auth_bearer import has_scope
 from control.capabilities import (
     CapabilitySnapshot,
     capability_from_model_id,
@@ -965,6 +968,7 @@ def _validate_workspace_decl(
     artifacts: Any,
     *,
     key: ApiKey | None = None,
+    plane: Any = None,
     task_store: Any = None,
     revisions: Any = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
@@ -1046,6 +1050,8 @@ def _validate_workspace_decl(
         if workspace is None:
             raise V1ApiError(400, WORKSPACE_INVALID, "handoff requires a workspace declaration")
         if has_artifact:
+            if key is not None and key.id.startswith("usr_"):
+                require_artifact_owner(plane, artifacts, key, handoff["artifact_id"])
             try:
                 artifacts.manifest(handoff["artifact_id"])
             except ArtifactNotFoundError as exc:
@@ -1187,7 +1193,7 @@ def create_agent(
     ``handoff`` makes run-1 start from a referenced artifact or commit.
     """
     workspace, handoff, git = _validate_workspace_decl(
-        body, artifacts, key=key, task_store=task_store, revisions=revisions
+        body, artifacts, key=key, plane=plane, task_store=task_store, revisions=revisions
     )
     contract = _normalize_contract(body.output_contract)
     compute = _validate_compute(body)
@@ -1525,6 +1531,7 @@ def list_agents(
         )
         bindings_fut = pool.submit(workflows.all_bindings)
         records = records_fut.result()
+        records = [rec for rec in records if owner_visible(key, rec.owner)]
         if scoped_fut is not None:
             # SOR-84: index-backed scope — only agents whose durable
             # binding matches (caller key id, workflow_id) are listed.
@@ -1580,6 +1587,7 @@ def agents_summary(
     the expensive page when the set actually changed.
     """
     records = plane.store.list_all()
+    records = [rec for rec in records if owner_visible(key, rec.owner)]
     if workflow_id is not None:
         try:
             scoped = workflows.agent_ids(key.id, workflow_id)
@@ -1812,6 +1820,7 @@ def apply_handoff(
     handoffs: Any = Depends(get_handoffs),
     task_store: Any = Depends(get_task_store),
     revisions: Any = Depends(get_revisions),
+    artifacts: Any = Depends(get_artifact_store),
 ) -> dict[str, Any]:
     """Apply a second-agent handoff into a live agent's workspace.
 
@@ -1827,6 +1836,8 @@ def apply_handoff(
     rec = _require_live_idle(plane, agent_id)
     handle = rec.handle()
     has_artifact = bool(body.artifact_id)
+    if has_artifact and key.id.startswith("usr_"):
+        require_artifact_owner(plane, artifacts, key, body.artifact_id)
     has_head = bool(body.head_sha)
     has_pr = body.pull_request is not None
     has_task = bool(body.task_id)
@@ -1990,6 +2001,7 @@ def list_artifacts(
     limit: int | None = None,
     key: ApiKey = Depends(agents_key),
     artifacts: Any = Depends(get_artifact_store),
+    plane: Any = Depends(get_plane),
 ) -> dict[str, Any]:
     """Durable artifact manifests, ``(created_at, artifact_id)`` keyset order.
 
@@ -2003,7 +2015,19 @@ def list_artifacts(
     list_page = getattr(artifacts, "list_page", None)
     try:
         with observe("v1.artifact.list", agent_id=agent_id):
-            if callable(list_page):
+            if not has_scope(key, "admin"):
+                owners = {rec.id: rec.owner for rec in plane.store.list_all()}
+                visible = [
+                    m
+                    for m in artifacts.list(agent_id=agent_id)
+                    if (m.producer_agent_id not in owners and not key.id.startswith("usr_"))
+                    or (
+                        m.producer_agent_id in owners
+                        and owner_visible(key, owners[m.producer_agent_id])
+                    )
+                ]
+                page = page_manifests(visible, cursor=cursor, limit=limit)
+            elif callable(list_page):
                 page = list_page(agent_id=agent_id, cursor=cursor, limit=limit)
             else:
                 # Stores without list_page (custom injects): page in memory

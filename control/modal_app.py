@@ -42,6 +42,8 @@ CONTROL_IMAGE = (
     # non-github.com remotes (github.com goes through the REST API).
     .apt_install("git")
     .pip_install(
+        "argon2-cffi>=23.1.0",
+        "psycopg[binary]>=3.2.0",
         "fastapi",
         "httpx",
         "pydantic",
@@ -162,6 +164,9 @@ def reap_cron() -> None:
         )
         return
     plane = web.state.plane
+    # Expired auth sessions and rate slots need no retention; permanent
+    # identities, API keys and key revocations are never removed here.
+    _bounded_call(lambda: web.state.user_auth.store.prune(web.state.user_auth.clock()) or True, 15)
     # SOR-139: this plane owns no turn watchers, so every ``running`` record
     # is watcher-less — settle those with written turn evidence into
     # FINISHED + idle before the reaper judges staleness. The reconcile

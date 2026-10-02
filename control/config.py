@@ -280,6 +280,9 @@ def app_secret_names(env: Mapping[str, str] | None = None) -> list[str]:
     github_app_secret = env.get("SBX_GITHUB_APP_SECRET_NAME")
     if github_app_secret:
         names.append(github_app_secret)
+    auth_secret = env.get("SBX_AUTH_SECRET_NAME")
+    if auth_secret:
+        names.append(auth_secret)
     return names
 
 
@@ -306,6 +309,10 @@ _PROVIDER_SEED_PROVIDERS = ("CODEX", "DEVIN", "ANTIGRAVITY", "GROK", "OPENCODE")
 _PROVIDER_SEED_SUFFIXES = ("ACCOUNT_ID", "SECRET_NAME", "SLOTS", "MODELS", "ACCOUNTS")
 
 REMOTE_ENV_KEYS: tuple[str, ...] = (
+    "SBX_AUTH_ORIGIN",
+    "SBX_AUTH_SESSION_TTL_S",
+    "SBX_AUTH_COOKIE_SECURE",
+    "SBX_AUTH_SECRET_NAME",
     "SBX_MODAL_APP_NAME",
     # The provider selection is runtime policy as well as deploy-time image /
     # Secret configuration. The remote API must seed and schedule only the

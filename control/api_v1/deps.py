@@ -382,20 +382,78 @@ def get_workflow_service(
 
 
 def api_key(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     store: ApiKeyStore = Depends(get_key_store),
 ) -> ApiKey:
-    """Any valid (unrevoked) ``sbx_`` key; 401 otherwise."""
-    key = lookup_key(store, bearer_token(credentials))
+    """Stable owner principal from a browser session or explicit Bearer key.
+
+    Explicit Authorization always takes precedence and never falls back to
+    cookies, including malformed/revoked credentials. Legacy IDs stay intact.
+    """
+    from control.user_auth.routes import browser_session, get_auth
+
+    if "authorization" not in request.headers:
+        if request.cookies.get(request.app.state.auth_config.cookie):
+            row = browser_session(request)
+            return get_auth(request).principal(row["owner"])
+    token = bearer_token(credentials)
+    key = None
+    if token:
+        key = get_auth(request).lookup_key(token)
+        if key is None:
+            key = lookup_key(store, token)
     if key is None:
         raise V1ApiError(401, "unauthorized", "missing or invalid bearer token")
     return key
 
 
-def agents_key(key: ApiKey = Depends(api_key)) -> ApiKey:
+def owner_visible(key: ApiKey, owner: str) -> bool:
+    """Users only see their own data. Preserve the legacy deployment lane.
+
+    Legacy agents keys retain their shared legacy-resource behavior; only
+    operator admin keys may cross into normal users' resources.
+    """
+    return (
+        key.id == owner
+        or has_scope(key, "admin")
+        or (not key.id.startswith("usr_") and not owner.startswith("usr_"))
+    )
+
+
+def require_artifact_owner(plane: Any, artifacts: Any, key: ApiKey, artifact_id: str) -> None:
+    from control.artifacts import ArtifactError
+
+    try:
+        manifest = artifacts.manifest(artifact_id)
+    except ArtifactError:
+        if not key.id.startswith("usr_"):
+            return  # preserve legacy route-specific error handling
+        raise V1ApiError(404, "not_found", "artifact not found") from None
+    rec = plane.store.get(manifest.producer_agent_id)
+    if rec is None and not key.id.startswith("usr_"):
+        return
+    if rec is None or not owner_visible(key, rec.owner):
+        raise V1ApiError(404, "not_found", "artifact not found")
+
+
+def agents_key(request: Request, key: ApiKey = Depends(api_key)) -> ApiKey:
     """Key with the ``agents`` scope (agent / run / meta endpoints)."""
     if not has_scope(key, "agents"):
         raise V1ApiError(403, "forbidden", "api key lacks required scope 'agents'")
+    # All /v1 agent reads, writes and streams pass through this dependency.
+    # Check before the handler can touch a sandbox or expose its run data.
+    if request.url.path.startswith("/v1/"):
+        agent_id = request.path_params.get("agent_id")
+        if agent_id:
+            rec = get_plane(request).store.get(agent_id)
+            if rec is not None and not owner_visible(key, rec.owner):
+                raise V1ApiError(404, "not_found", "agent not found")
+        artifact_id = request.path_params.get("artifact_id")
+        if artifact_id and not has_scope(key, "admin"):
+            require_artifact_owner(
+                get_plane(request), get_artifact_store(request), key, artifact_id
+            )
     return key
 
 

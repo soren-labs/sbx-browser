@@ -26,6 +26,7 @@ _CLOUD_PREFIXES = (
     "HF_",
     # Control-plane credential bridges.
     "SBX_BASIC_",
+    "SBX_AUTH_",
     "SBX_ACCOUNT_",
     "SBX_PROVIDER_",
     "SBX_LINEAR_",

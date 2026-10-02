@@ -5,6 +5,8 @@ description = "Cursor Cloud Agent-style Codex cloud sessions (browser + control 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=23.1.0",
+    "psycopg[binary]>=3.2.0",
     "fastapi>=0.115.0",
     "httpx>=0.27.0",
     # SOR-203: 0.76.0 introduced the autoscaler names the control app uses

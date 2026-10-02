@@ -363,6 +363,7 @@ def create_app(
     workflow_store: WorkflowStore | None = None,
     task_store: Any | None = None,
     revision_store: Any | None = None,
+    auth_store: Any | None = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -428,6 +429,24 @@ def create_app(
     )
 
     app = FastAPI(title="sbx-control", version="0.1.1")
+    from control.user_auth.routes import AuthConfig
+    from control.user_auth.routes import router as user_auth_router
+    from control.user_auth.service import AuthService
+    from control.user_auth.store import select_store as select_auth_store
+
+    app.state.auth_config = AuthConfig.from_env()
+    app.state.user_auth = AuthService(auth_store or select_auth_store())
+    app.include_router(user_auth_router)
+
+    @app.middleware("http")
+    async def auth_cache_headers(request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith("/auth/") or request.cookies.get(
+            app.state.auth_config.cookie
+        ):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     app.include_router(api_v1_router)  # empty shell until P2-D (SOR-64)
     app.include_router(api_v2_router)  # Session-first facade (SOR-256)
     app.state.plane = plane

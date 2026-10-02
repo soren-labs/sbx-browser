@@ -88,3 +88,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
 
 License selection is pending owner decision; [LICENSE](LICENSE) is currently
 a placeholder, not a grant.
+
+Account/session authentication and optional user-owned API keys are documented in [control/README.md](control/README.md#user-accounts-and-browser-sessions-pr-a). Production authentication requires shared PostgreSQL; OAuth and the login/register UI are follow-up PRs.
