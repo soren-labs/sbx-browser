@@ -105,8 +105,10 @@ export interface SessionApi {
   listProviders(): Promise<ProviderInfo[]>;
   listModels(): Promise<ModelInfo[]>;
   getIntegrations(): Promise<IntegrationStatus>;
+  /** Read GitHub independently so provider failures cannot hide its status. */
+  getGithubStatus(signal?: AbortSignal): Promise<IntegrationStatus["github"]>;
   /** Step 1 of Connect GitHub — returns the install URL to open. */
-  beginGithubAuthorize(): Promise<{ url: string }>;
+  beginGithubAuthorize(signal?: AbortSignal): Promise<{ url: string }>;
   listChanges(sessionId: string): Promise<SessionChange[]>;
   /**
    * File-level view of the latest ready revision (GET .../changes/diff):

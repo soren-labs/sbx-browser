@@ -349,6 +349,7 @@ export class HttpSessionApi implements SessionApi {
     path: string,
     body?: unknown,
     extraHeaders?: HeadersInit,
+    signal?: AbortSignal,
   ): Promise<T> {
     let res: Response;
     try {
@@ -363,6 +364,7 @@ export class HttpSessionApi implements SessionApi {
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         credentials: "omit",
+        signal,
       });
     } catch {
       throw new ApiError("network", "network request failed", {
@@ -589,42 +591,49 @@ export class HttpSessionApi implements SessionApi {
   }
 
   async getIntegrations(): Promise<IntegrationStatus> {
-    const [providers, gh] = await Promise.all([
+    const [providers, github] = await Promise.all([
       this.listProviders(),
-      this.request<any>("GET", PATHS.githubApp).catch((e) => {
-        // GitHub card should degrade gracefully, not 404 the page.
-        if (e instanceof ApiError && e.kind === "github_required") {
-          return { configured: false, installable: false, installations: [] };
-        }
-        throw e;
-      }),
+      this.getGithubStatus(),
     ]);
+    return {
+      providers,
+      github,
+      runtime: { enabled: providers.some((p) => p.runtimeEnabled) },
+    };
+  }
+
+  async getGithubStatus(signal?: AbortSignal): Promise<IntegrationStatus["github"]> {
+    const gh = await this.request<any>(
+      "GET", PATHS.githubApp, undefined, undefined, signal,
+    ).catch((e) => {
+      // GitHub card should degrade gracefully, not 404 the page.
+      if (e instanceof ApiError && e.kind === "github_required") {
+        return { configured: false, installable: false, installations: [] };
+      }
+      throw e;
+    });
     const installations = Array.isArray(gh?.installations) ? gh.installations : [];
     const accounts = installations
       .map((i: any) => i?.account_login)
       .filter((a: unknown): a is string => typeof a === "string" && !!a);
     return {
-      providers,
-      github: {
-        configured: Boolean(gh?.configured),
-        installable: Boolean(gh?.installable ?? gh?.configured),
-        connected: accounts.length > 0 || Boolean(gh?.broker?.bound),
-        bridgeToken: Boolean(gh?.bridge_token),
-        brokerBound: Boolean(gh?.broker?.bound),
-        brokerHealthy: Boolean(gh?.broker?.healthy),
-        accounts,
-        appSlug: gh?.app_slug ?? undefined,
-        source: gh?.source ?? undefined,
-      },
-      runtime: {
-        enabled: providers.some((p) => p.runtimeEnabled),
-      },
+      configured: Boolean(gh?.configured),
+      installable: Boolean(gh?.installable ?? gh?.configured),
+      connected: accounts.length > 0 || Boolean(gh?.broker?.bound),
+      bridgeToken: Boolean(gh?.bridge_token),
+      brokerBound: Boolean(gh?.broker?.bound),
+      brokerHealthy: Boolean(gh?.broker?.healthy),
+      accounts,
+      appSlug: gh?.app_slug ?? undefined,
+      source: gh?.source ?? undefined,
     };
   }
 
-  async beginGithubAuthorize(): Promise<{ url: string }> {
-    // POST /v1/github/app/authorize → 201 {authorize_url, state, expires_at}
-    const data = await this.request<any>("POST", PATHS.githubAuthorize, {});
+  async beginGithubAuthorize(signal?: AbortSignal): Promise<{ url: string }> {
+    // POST /v1/github/install → 201 {authorize_url, mode, state, expires_at}
+    const data = await this.request<any>(
+      "POST", PATHS.githubAuthorize, {}, undefined, signal,
+    );
     const url = data?.authorize_url;
     if (typeof url !== "string" || !url) {
       throw new ApiError("github_required", "no authorize_url in response", {
@@ -632,6 +641,15 @@ export class HttpSessionApi implements SessionApi {
       });
     }
     return { url };
+  }
+
+  async completeGithubAuthorize(
+    installationId: number, state: string, signal?: AbortSignal,
+  ): Promise<void> {
+    await this.request(
+      "POST", "/v1/github/app/authorize/callback",
+      { installation_id: installationId, state }, undefined, signal,
+    );
   }
 
   async listChanges(sessionId: string): Promise<SessionChange[]> {

@@ -71,9 +71,11 @@ async function managementRequest(
   path: string,
   body?: unknown,
   method?: string,
+  signal?: AbortSignal,
 ) {
   const base = String(import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
   const response = await fetch(base + "/v1" + path, {
+    signal,
     method: method ?? (body === undefined ? "GET" : "POST"),
     headers: {
       "Content-Type": "application/json",
@@ -218,12 +220,12 @@ export const connections = {
       {},
     );
   },
-  async syncGithub() {
+  async syncGithub(signal?: AbortSignal) {
     if (demoMode) {
       await new Promise((resolve) => setTimeout(resolve, 650));
       return;
     }
-    await managementRequest("/github/app/sync", {});
+    await managementRequest("/github/app/sync", {}, undefined, signal);
   },
 };
 

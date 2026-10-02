@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { connections, connectionTerminal } from "../prototype/domain";
-import { HttpSessionApi } from "../api/http";
+import { HttpSessionApi, setToken } from "../api/http";
 afterEach(() => vi.restoreAllMocks());
 it("does not treat a failed credential probe with HTTP 200 as successful", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -46,6 +46,7 @@ it("stops auth polling on every real terminal state", () => {
   expect(connectionTerminal("authenticating")).toBe(false);
 });
 it("consumes callback state without retaining it in browser history", async()=>{
+ setToken("REDACTED");
  const {handleGithubReturn}=await import("../api/github-return");history.replaceState(null,"","/?installation_id=12&state=REDACTED");
  const fetch=vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response("{}",{status:200}));await handleGithubReturn();expect(location.href).not.toContain("REDACTED");expect(location.pathname).toBe("/integrations");expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toEqual({installation_id:12,state:"REDACTED"});history.replaceState(null,"","/");
 });

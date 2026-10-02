@@ -6,36 +6,21 @@ import {
   type AccountConnection,
 } from "./domain";
 import { demoMode, demoModels, providerNames } from "./demo";
-import type { ProviderInfo, IntegrationStatus } from "../api/types";
+import type { ProviderInfo } from "../api/types";
 import { Icon } from "./Icon";
+import { GithubConnection } from "./GithubConnection";
 
 function commandArgument(value:string) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
 export function Integrations() {
   const api = useApi();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [githubState, setGithubState] = useState<IntegrationStatus["github"]>();
-  const [notice, setNotice] = useState(
-    new URLSearchParams(location.search).get("broker") === "connected"
-      ? "GitHub installation connected."
-      : "",
-  );
+  const [notice, setNotice] = useState("");
   const connectionGeneration=useRef(0);
   const focusOrigin = useRef<HTMLElement | null>(null);
   const [accounts, setAccounts] = useState<AccountConnection[]>([]);
-  const [error, setError] = useState(
-    new URLSearchParams(location.search).has("broker_error")
-      ? "GitHub authorization did not complete. Try connecting again."
-      : "",
-  );
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [modelRefresh, setModelRefresh] = useState("");
-  const [synced, setSynced] = useState(
-    demoMode ? "Synced 3 minutes ago" : "Installation status",
-  );
-  const [githubLabel, setGithubLabel] = useState(
-    demoMode ? "soren-labs · 3 repositories available" : "GitHub App connected",
-  );
-  const [github, setGithub] = useState(false);
   const [provider, setProvider] = useState("codex");
   const [label, setLabel] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -53,16 +38,7 @@ export function Integrations() {
   };
   useEffect(() => {
     void refresh();
-    void api
-      .getIntegrations()
-      .then((s) => {
-        setProviders(s.providers);
-        setGithubState(s.github);
-        setGithub(s.github.connected);
-        if (!demoMode && s.github.accounts.length)
-          setGithubLabel(s.github.accounts.join(" · "));
-      })
-      .catch(() => setGithub(false));
+    void api.listProviders().then(setProviders).catch(() => setProviders([]));
   }, [api]);
   useEffect(() => {
     if (connecting) labelRef.current?.focus();
@@ -221,106 +197,7 @@ export function Integrations() {
           <h2>Source control</h2>
           <span>Repositories and pull requests</span>
         </div>
-        <section className="github-card">
-          <span className="integration-logo github-logo">
-            <Icon name="github" size={25} />
-          </span>
-          <div>
-            <h3>
-              GitHub{" "}
-              <span
-                className={`status ${github ? "status-idle" : "status-failed"}`}
-              >
-                <span className="status-dot" />
-                {github
-                  ? "Connected"
-                  : githubState?.bridgeToken
-                    ? "Credential available"
-                    : "Not connected"}
-              </span>
-            </h3>
-            <p>
-              {github
-                ? githubLabel
-                : githubState?.bridgeToken
-                  ? "Repository access uses the deployment’s GitHub credential. Connect an App installation to manage repository access here."
-                  : "Connect your repositories to create and review pull requests."}
-            </p>
-            <small>{synced}</small>
-          </div>
-          <button
-            className="button"
-            disabled={busy === "github"}
-            onClick={async () => {
-              const popup =
-                !github && !demoMode
-                  ? window.open("about:blank", "_blank")
-                  : null;
-              if (popup) popup.opener = null;
-              setBusy("github");
-              setError("");
-              try {
-                if (github) {
-                  await connections.syncGithub();
-                  const status = await api.getIntegrations();
-                  setGithub(status.github.connected);
-                  setGithubState(status.github);
-                  setGithubLabel(
-                    status.github.accounts.join(" · ") ||
-                      "GitHub App connected",
-                  );
-                  setSynced("Synced just now");
-                } else if (demoMode) {
-                  setGithub(true);
-                } else {
-                  const r = await api.beginGithubAuthorize();
-                  if (popup) {
-                    popup.location.href = r.url;
-                    setSynced(
-                      "Complete installation in GitHub, then check status.",
-                    );
-                  } else {
-                    window.location.assign(r.url);
-                  }
-                }
-              } catch (e) {
-                popup?.close();
-                setError((e as Error).message);
-              } finally {
-                setBusy("");
-              }
-            }}
-          >
-            <Icon name="refresh" size={14} />
-            {busy === "github"
-              ? "Syncing…"
-              : github
-                ? "Sync repositories"
-                : "Connect GitHub"}
-          </button>
-          {!github && !demoMode && (
-            <button
-              className="button small"
-              onClick={async () => {
-                try {
-                  const status = await api.getIntegrations();
-                  setGithub(status.github.connected);
-                  setGithubState(status.github);
-                  setGithubLabel(status.github.accounts.join(" · "));
-                  setSynced(
-                    status.github.connected
-                      ? "Installation connected"
-                      : "No installation connected yet",
-                  );
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
-            >
-              Check status
-            </button>
-          )}
-        </section>
+        <GithubConnection />
         <div className="section-header">
           <h2>AI providers</h2>
           <span>{accounts.length} subscription accounts</span>

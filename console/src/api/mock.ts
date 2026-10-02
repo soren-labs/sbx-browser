@@ -565,6 +565,10 @@ export class FixtureSessionApi implements SessionApi {
     return this.wait(clone(MODELS));
   }
 
+  async getGithubStatus(): Promise<IntegrationStatus["github"]> {
+    return (await this.getIntegrations()).github;
+  }
+
   async getIntegrations(): Promise<IntegrationStatus> {
     const data = clone(INTEGRATIONS);
     if (this.scenario === "github_required") {
