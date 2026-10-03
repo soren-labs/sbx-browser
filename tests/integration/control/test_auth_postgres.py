@@ -279,3 +279,29 @@ def test_postgres_modal_installation_and_cipher_survive_restart(postgres):
     restored = ConnectionStore(AuthStore(AuthDatabase(database_url=url)), vault)
     assert restored.credentials(restored.get(user.id, "modal")) == credential
     assert ModalConnectionService(restored, FakeModalProvider()).provision(user.id) == ready
+
+
+def test_postgres_codex_rotation_three_contenders_survives_restart(postgres):
+    from control.codex_broker import CodexBroker, FakeCodexProvider
+    from control.connections import ConnectionStore, SecretVault
+
+    url, stop, start = postgres
+    now = [1700000000.0]
+    auth = AuthStore(AuthDatabase(database_url=url), clock=lambda: now[0])
+    user = auth.create_user(email="pg-codex@example.test")
+    vault = SecretVault(secrets.token_bytes(32))
+    store = ConnectionStore(auth, vault)
+    provider = FakeCodexProvider(store)
+    broker = CodexBroker(store, provider)
+    state = broker.authorize(user.id)["state"]
+    broker.callback(user.id, state, f"mock:{user.id}")
+    now[0] += 250
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        leases = list(pool.map(lambda _: broker.lease(user.id), range(3)))
+    assert provider.calls == 1 and len({lease.access_token for lease in leases}) == 1
+    stop()
+    start()
+    restored = ConnectionStore(
+        AuthStore(AuthDatabase(database_url=url), clock=lambda: now[0]), vault
+    )
+    assert CodexBroker(restored, FakeCodexProvider(restored)).lease(user.id) == leases[0]

@@ -69,6 +69,17 @@ def test_browser_connects_modal_and_github(tmp_path, monkeypatch):
                 account = app.state.github_connections.for_user(user.id)._client.login
                 playwright.expect(page.get_by_text(f"Connected: {account}")).to_be_visible()
                 playwright.expect(page.get_by_text(f"{account}/alpha", exact=True)).to_be_visible()
+                page.get_by_role("button", name="Connect Codex", exact=True).click()
+                section = page.get_by_role("region", name="Codex connection")
+                playwright.expect(section.get_by_text("Connected", exact=True)).to_be_visible()
+                app.state.codex_broker.provider.revoked = True
+                app.state.auth_store.clock = lambda: time.time() + 250
+                page.get_by_role("button", name="Check Codex connection", exact=True).click()
+                playwright.expect(
+                    section.get_by_text("Reauth required", exact=True)
+                ).to_be_visible()
+                page.get_by_role("button", name="Disable Codex", exact=True).click()
+                playwright.expect(section.get_by_text("Disabled", exact=True)).to_be_visible()
             finally:
                 browser.close()
     finally:

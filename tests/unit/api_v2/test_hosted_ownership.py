@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 from control.app import create_app
 from control.auth_store import AuthDatabase, AuthStore, PersistentApiKeyStore
+from control.connections import SecretVault
 from control.hosted_auth_routes import COOKIE_NAME
 from fastapi.testclient import TestClient
 from tests.unit.api_v2.conftest import create_session, wait_session
 
 
 @pytest.fixture
-def hosted_app(credentialed, tmp_path, stub_runner):
+def hosted_app(credentialed, tmp_path, stub_runner, monkeypatch):
+    monkeypatch.setenv("SBX_CONNECTIONS_MODE", "mock")
+    vault = SecretVault(secrets.token_bytes(32))
     auth = AuthStore(AuthDatabase(path=tmp_path / "hosted.sqlite3"))
     users = [auth.create_user(email=f"user-{i}@example.test") for i in range(2)]
     keys = PersistentApiKeyStore(auth)
@@ -26,11 +31,14 @@ def hosted_app(credentialed, tmp_path, stub_runner):
             auth_store=AuthStore(AuthDatabase(path=auth.database._path)),
             state_backend="postgres",
             hosted=True,
+            connection_vault=vault,
             runner_cmd=[sys.executable, str(stub_runner)],
             max_concurrent=64,
         )
-        app.state.account_registry = credentialed.registry
-        app.state.scheduler = credentialed.scheduler
+        for user in users:
+            if app.state.connections.get(user.id, "codex") is None:
+                state = app.state.codex_broker.authorize(user.id)["state"]
+                app.state.codex_broker.callback(user.id, state, f"mock:{user.id}")
         return app
 
     return factory, auth, users, tokens, second
@@ -96,3 +104,53 @@ def test_hosted_state_requires_durable_database_and_is_separate_from_compute(mon
         create_app()
     with pytest.raises(ValueError, match="requires PostgreSQL"):
         create_app(state_backend="legacy")
+
+
+def test_three_live_sessions_share_owned_codex_connection_without_rotation_races(
+    hosted_app, monkeypatch
+):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    factory, _, users, tokens, _ = hosted_app
+    monkeypatch.setenv("FAKE_CODEX_SCENARIO", "hang")
+    app = factory()
+    owner = users[0].id
+    with TestClient(app, base_url="https://testserver") as client:
+        now = [app.state.auth_store.clock() + 250]
+        app.state.auth_store.clock = lambda: now[0]
+        provider = app.state.codex_broker.provider
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(
+                pool.map(
+                    lambda i: create_session(client, headers(tokens[0]), prompt=f"Session {i}"),
+                    range(3),
+                )
+            )
+        ids = [result["session"]["id"] for result in results]
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            records = app.state.plane.store.list_all()
+            if sum(r.status == "running" and r.owner == owner for r in records) == 3:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("three concurrent Sessions never reached running")
+        connection = app.state.connections.get(owner, "codex")
+        assert {r.sandbox_tags["account_id"] for r in records if r.owner == owner} == {
+            connection.id
+        }
+        assert provider.calls_by_owner[owner] == 1
+        assert client.post(
+            "/v2/sessions",
+            headers=headers(tokens[0]),
+            json={"prompt": "fourth", "execution": {"provider": "codex"}},
+        ).status_code in {409, 429}
+        for session_id in ids:
+            assert (
+                client.post(
+                    f"/v2/sessions/{session_id}/cancel", json={}, headers=headers(tokens[0])
+                ).status_code
+                == 200
+            )
+        assert app.state.plane.credential_sync is None

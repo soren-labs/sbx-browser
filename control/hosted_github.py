@@ -266,6 +266,16 @@ class GitHubScopedBackend:
 
     def exec(self, handle, argv, env=None):
         outgoing = {k: v for k, v in (env or {}).items() if not github.owns_env_key(k)}
+        broker = getattr(self, "codex_broker", None)
+        if broker is not None:
+            for key in ("CODEX_AUTH_JSON", "SBX_ACCOUNT_CREDENTIAL", "SBX_PROVIDER_API_KEY"):
+                outgoing.pop(key, None)
+            if "init" in argv or "turn" in argv or "resume" in argv:
+                import json
+
+                lease = broker.lease(handle.tags.get("owner", ""))
+                outgoing["SBX_ACCOUNT_CREDENTIAL"] = json.dumps(lease.blob())
+                outgoing["SBX_ACCOUNT_ID"] = lease.connection_id
         repo = outgoing.pop("SBX_GITHUB_REPO", None)
         workspace = self.workspace_store.get(handle.tags.get("session_id", ""))
         repo = repo or (workspace.repo if workspace else None)

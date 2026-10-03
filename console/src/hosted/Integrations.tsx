@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { CodexConnection } from "./CodexConnection";
 import { GitHubConnection } from "./GitHubConnection";
 import { hostedRequest, type HostedConnection } from "./api";
 
@@ -67,5 +68,6 @@ export function HostedIntegrations() {
       {connection && <button disabled={busy} onClick={() => void action(provision)}>Reconcile runtime</button>}
     </section>
     <GitHubConnection />
+    <CodexConnection />
   </div></div>;
 }

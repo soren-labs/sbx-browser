@@ -376,6 +376,7 @@ def create_app(
     connection_vault: Any = None,
     modal_provider: Any = None,
     github_factory: Any = None,
+    codex_provider: Any = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -520,6 +521,8 @@ def create_app(
         # Run bounded, synchronous initialization before starting the refresher
         # or yielding readiness; startup needs no thread-pool round trip.
         app.state.auth_store.database.initialize()
+        if hosted:
+            app.state.codex_broker.start()
         refresher = credential_refresher_factory() if credential_refresher_factory else None
         if refresher is not None:
             plane.credential_refresher = refresher
@@ -528,6 +531,8 @@ def create_app(
                 refresher.start()
             yield
         finally:
+            if hosted:
+                app.state.codex_broker.stop()
             if refresher is not None:
                 refresher.stop()
 
@@ -729,7 +734,28 @@ def create_app(
             else UnconfiguredModalProvider()
         ),
     )
+    from control.codex_broker import CodexBroker, FakeCodexProvider, UnconfiguredCodexProvider
+
+    app.state.codex_broker = CodexBroker(
+        app.state.connections,
+        codex_provider
+        if codex_provider is not None
+        else (
+            FakeCodexProvider(app.state.connections)
+            if os.environ.get("SBX_CONNECTIONS_MODE") == "mock"
+            else UnconfiguredCodexProvider()
+        ),
+    )
+    if hosted:
+        from control.hosted_accounts import HostedAccounts, HostedScheduling
+
+        app.state.hosted_accounts = HostedAccounts(app.state.codex_broker)
+        app.state.hosted_scheduling = HostedScheduling(app.state.hosted_accounts, plane.store)
+        backend.codex_broker = app.state.codex_broker
+        plane.max_concurrent = min(plane.max_concurrent, 5)
     configure_v1_bootstrap(app)
+    if hosted:
+        app.state.account_registry = app.state.hosted_accounts
 
     def reserve_recovery(rec: SessionRecord) -> Callable[[bool], None]:
         from control.api_v1.deps import get_scheduler
@@ -752,7 +778,11 @@ def create_app(
             return finish_existing
         if account_id == "auto":
             return lambda _success: None
-        scheduler = get_scheduler(Request({"type": "http", "app": app}))
+        scheduler = (
+            app.state.hosted_scheduling.for_user(rec.owner)
+            if hosted
+            else get_scheduler(Request({"type": "http", "app": app}))
+        )
         acquire = getattr(scheduler, "acquire", None)
         if not callable(acquire):
             decision = scheduler.decide(
@@ -800,7 +830,11 @@ def create_app(
         secret_writer=(ModalCredentialSecretWriter() if backend_kind == "modal" else None),
         lifecycle=plane.credential_lifecycle,
     )
-    if worker_enabled(backend_kind):
+    if hosted:
+        # Hosted refresh never executes or accepts write-back in a sandbox.
+        plane.credential_sync = None
+        plane.credential_lifecycle = None
+    if not hosted and worker_enabled(backend_kind):
         # Proactive OAuth refresh: a per-account claim + the official CLI's
         # own refresh path inside a throwaway sandbox, committed via the
         # SOR-147 CAS write-back (store blob + managed Secret).

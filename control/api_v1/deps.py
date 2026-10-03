@@ -62,6 +62,13 @@ def get_run_states(request: Request) -> RunStateStore:
 
 
 def get_registry(request: Request) -> AccountRegistry:
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.ownership import request_user_id
+
+        owner = request_user_id(request)
+        if owner is None:
+            raise V1ApiError(401, "unauthorized", "user authentication required")
+        return request.app.state.hosted_accounts.scoped(owner)
     registry = getattr(request.app.state, "account_registry", None)
     if registry is None:
         registry = InMemoryAccountRegistry()
@@ -70,6 +77,13 @@ def get_registry(request: Request) -> AccountRegistry:
 
 
 def get_scheduler(request: Request) -> Scheduler:
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.ownership import request_user_id
+
+        owner = request_user_id(request)
+        if owner is None:
+            raise V1ApiError(401, "unauthorized", "user authentication required")
+        return request.app.state.hosted_scheduling.for_user(owner)
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is None:
         # SOR-63/D1 is the default scheduler even without bootstrap: atomic
@@ -197,6 +211,15 @@ def get_capabilities(request: Request) -> Any:
     ``app.state.capabilities`` when a test/deploy injects one; else bound
     to the plane's backend (sandbox probe) or the declared fallback probe.
     """
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.capabilities import CapabilityCatalog, DeclaredCapabilityProbe
+
+        registry = get_registry(request)
+        return CapabilityCatalog(
+            DeclaredCapabilityProbe(),
+            get_account=registry.get,
+            get_blob=registry.get_credential_blob,
+        )
     catalog = getattr(request.app.state, "capabilities", None)
     if catalog is None:
         from control.capabilities import catalog_for_plane

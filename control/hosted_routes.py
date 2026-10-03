@@ -146,3 +146,51 @@ def github_disconnect(installation_id: int, request: Request, owner: str = Depen
     if service._store.get(installation_id) is None:
         raise HostedAuthError("not_found", 404)
     return service.revoke(installation_id)
+
+
+@router.get("/connections/codex")
+def codex_status(request: Request, owner: str = Depends(user_id)):
+    broker = request.app.state.codex_broker
+    record = broker.store.get(owner, "codex")
+    return {
+        "connection": record.public() if record else None,
+        "configured": broker.provider.configured,
+        "mock": broker.provider.mock,
+    }
+
+
+@router.post("/connections/codex/authorize")
+def codex_authorize(request: Request, owner: str = Depends(user_id)):
+    return request.app.state.codex_broker.authorize(owner)
+
+
+@router.post("/connections/codex/callback")
+def codex_callback(body: CallbackBody, request: Request, owner: str = Depends(user_id)):
+    record = request.app.state.codex_broker.callback(
+        owner, body.state.get_secret_value(), body.code.get_secret_value()
+    )
+    return {"connection": record.public()}
+
+
+@router.post("/connections/codex/mock-approve")
+def codex_mock_approve(body: StateBody, request: Request, owner: str = Depends(user_id)):
+    broker = request.app.state.codex_broker
+    if not broker.provider.mock:
+        raise HostedAuthError("not_found", 404)
+    return {
+        "connection": broker.callback(
+            owner, body.state.get_secret_value(), f"mock:{owner}"
+        ).public()
+    }
+
+
+@router.post("/connections/codex/refresh")
+def codex_refresh(request: Request, owner: str = Depends(user_id)):
+    broker = request.app.state.codex_broker
+    broker.lease(owner)
+    return {"connection": broker.store.get(owner, "codex").public()}
+
+
+@router.delete("/connections/codex")
+def codex_disable(request: Request, owner: str = Depends(user_id)):
+    return {"connection": request.app.state.codex_broker.disable(owner).public()}

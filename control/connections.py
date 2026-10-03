@@ -65,7 +65,9 @@ class Connection:
             "id": self.id,
             "provider": self.provider,
             "state": self.state,
-            "metadata": self.metadata,
+            "metadata": {
+                key: value for key, value in self.metadata.items() if key != "refresh_claim"
+            },
             "version": self.version,
             "updated_at": self.updated_at,
         }
@@ -114,7 +116,9 @@ class ConnectionStore:
         record.version += 1
         return record
 
-    def connect(self, user_id: str, provider: str, credentials: dict[str, Any]) -> Connection:
+    def connect(
+        self, user_id: str, provider: str, credentials: dict[str, Any], *, metadata_factory=None
+    ) -> Connection:
         if self.vault is None:
             raise HostedAuthError("encryption_not_configured", 503)
         with _write(self.auth, f"connection:{user_id}:{provider}") as conn:
@@ -132,6 +136,8 @@ class ConnectionStore:
                     _iso(self.auth.clock()),
                 )
                 record.credential_cipher = self.vault.seal(credentials, context=record.context)
+                if metadata_factory is not None:
+                    record.metadata = metadata_factory(record.version)
                 self.auth.database.execute(
                     conn,
                     "INSERT INTO hosted_connections "
@@ -152,6 +158,8 @@ class ConnectionStore:
             else:
                 record.credential_cipher = self.vault.seal(credentials, context=record.context)
                 record.state, record.metadata = "connected", {}
+                if metadata_factory is not None:
+                    record.metadata = metadata_factory(record.version + 1)
                 self.save(record, conn=conn)
         return record
 
