@@ -203,6 +203,29 @@ class HostedGitHubService(GitHubAppService):
             "SBX_GITHUB_BROKER_URL": "off",
         }
 
+    def mock_repo(self, repo):
+        from control.mock_git import bare_repository
+
+        canonical = canonicalize_repo(repo)
+        if not self.mock or self.installation_for_repo(canonical.slug) is None:
+            raise TaskRefusal(404, "not_found", "repository not found")
+        return bare_repository(self.owner, canonical.slug)
+
+    def ls_remote(self, repo, ref, **kwargs):
+        from control.github_remote import ls_remote
+
+        if ref != "HEAD" and not ref.startswith("refs/"):
+            ref = f"refs/heads/{ref}"
+        return ls_remote(str(self.mock_repo(repo)), ref, env={})
+
+    def push_payload(self, repo, branch, **kwargs):
+        from control.github_remote import push_payload
+
+        kwargs["env"] = {}
+        sha = push_payload(str(self.mock_repo(repo)), branch, **kwargs)
+        self.remote(repo).record_push(branch, sha)
+        return sha
+
 
 class HostedGitHub:
     def __init__(self, connections: ConnectionStore, *, mock=False, factory=None):
@@ -232,7 +255,7 @@ class UserRepoResolver:
     def resolve_ref(self, repo, ref):
         source = self._resolver(repo)
         return (
-            hashlib.sha1(f"{repo.canonical}:{ref}".encode()).hexdigest()
+            self.service.ls_remote(repo.canonical, ref)
             if self.service.mock and self.source is None
             else source.resolve_ref(repo, ref)
         )
@@ -288,6 +311,12 @@ class GitHubScopedBackend:
             outgoing.update(
                 github.exec_env(env={"SBX_GITHUB_EPHEMERAL": "1", "GH_TOKEN": token}, repo=repo)
             )
+            if service.mock:
+                from control.mock_git import rewrite_env
+
+                outgoing = rewrite_env(
+                    service.mock_repo(repo), canonicalize_repo(repo).canonical, outgoing
+                )
         return self.source.exec(handle, argv, env=outgoing)
 
 

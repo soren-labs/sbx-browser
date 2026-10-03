@@ -4,6 +4,8 @@ import type {
   SessionChangesDiff,
   SessionFileDiff,
 } from "../api/types";
+import { hostedMode } from "../hosted/api";
+import { HostedReviewActions } from "../hosted/ReviewActions";
 import { useApi } from "../state/api";
 import { demoMode, providerNames } from "./demo";
 import { reviews, type ReviewRecord } from "./domain";
@@ -317,7 +319,7 @@ export function Review({
               </p>
             )}
           </div>
-          <ReviewActions session={session} onChanged={onChanged} />
+          {hostedMode ? <HostedReviewActions session={session} onChanged={onChanged} /> : <ReviewActions session={session} onChanged={onChanged} />}
         </>
       ) : (
         <div className="delivery-empty">

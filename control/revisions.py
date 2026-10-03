@@ -656,12 +656,16 @@ class RevisionService:
         remote: Any = None,
         clock: Callable[[], datetime] | None = None,
         env_for_repo: Any = None,
+        push_payload_fn: Any = None,
+        ls_remote_fn: Any = None,
     ) -> None:
         self._store = store
         self._artifacts = artifacts
         self._workspaces = workspaces
         self._env_map = env
         self._env_for_repo = env_for_repo
+        self._push_payload = push_payload_fn
+        self._ls_remote = ls_remote_fn
         self._remote = remote
         self._clock = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
@@ -800,7 +804,7 @@ class RevisionService:
             if is_commit_sha(sha):
                 return f"refs/pull/{number}/head", sha
         ref = f"refs/pull/{number}/head"
-        sha = github_remote.ls_remote(
+        sha = (self._ls_remote or github_remote.ls_remote)(
             f"https://github.com/{slug}", ref, env=self._env(f"https://github.com/{slug}")
         )
         if not is_commit_sha(sha):
@@ -1208,7 +1212,7 @@ class RevisionService:
             base_ref = (
                 str(policy.get("target") or (record.base_ref if record else "") or "") or None
             )
-            pushed = push_payload(
+            pushed = (self._push_payload or push_payload)(
                 repo,
                 branch,
                 kind=kind,
@@ -1571,7 +1575,7 @@ class RevisionService:
             pull_draft = pull.get("draft") is True
         except RemoteGitHubError:
             # API unreachable (e.g. local dev): ls-remote is the same truth.
-            remote_sha = github_remote.ls_remote(
+            remote_sha = (self._ls_remote or github_remote.ls_remote)(
                 repo, f"refs/pull/{number}/head", env=self._env(repo)
             )
         if pull_draft:

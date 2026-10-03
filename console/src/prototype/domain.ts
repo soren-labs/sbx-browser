@@ -1,3 +1,4 @@
+import { hostedMode } from "../hosted/api";
 import { getToken } from "../api/http";
 import { demoMode } from "./demo";
 import type { ActivityItem } from "../api/types";
@@ -75,9 +76,10 @@ async function managementRequest(
   const base = String(import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
   const response = await fetch(base + "/v1" + path, {
     method: method ?? (body === undefined ? "GET" : "POST"),
+    credentials: hostedMode ? "include" : "omit",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
+      ...(hostedMode ? {} : {Authorization: `Bearer ${getToken()}`}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });

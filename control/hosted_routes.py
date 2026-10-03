@@ -205,3 +205,40 @@ def sandbox_connect(session_id: str, request: Request, owner: str = Depends(user
     if agent is None or agent.owner != owner or agent.handle() is None:
         raise HostedAuthError("sandbox_unavailable", 409)
     return request.app.state.plane.backend.connect(agent.handle())
+
+
+class ReviewSessionBody(AuthBody):
+    revision: str | None = None
+
+
+@router.post("/sessions/{session_id}/review-sessions", status_code=201)
+def start_review_session(
+    session_id: str, body: ReviewSessionBody, request: Request, key: ApiKey = Depends(agents_key)
+):
+    from control.hosted_reviews import start_review
+
+    return start_review(request, key, session_id, body.revision)
+
+
+@router.get("/review-sessions/{session_id}")
+def get_review_session(session_id: str, request: Request, owner: str = Depends(user_id)):
+    from control.hosted_reviews import review_status
+
+    return review_status(request, owner, session_id)
+
+
+@router.get("/sessions/{session_id}/review-sessions")
+def list_review_sessions(session_id: str, request: Request, owner: str = Depends(user_id)):
+    from control.hosted_reviews import review_status
+
+    task = request.app.state.task_store.get(session_id)
+    if task is None or task.owner != owner:
+        raise HostedAuthError("not_found", 404)
+    rows = request.app.state.database_records.rows("hosted_review_sessions", owner=owner)
+    return {
+        "sessions": [
+            review_status(request, owner, identifier)
+            for identifier, row in sorted(rows, key=lambda item: item[1].get("created_at", 0))
+            if row["author_session_id"] == session_id
+        ]
+    }

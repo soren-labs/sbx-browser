@@ -398,6 +398,8 @@ def get_revisions(request: Request) -> Any:
             env={},
             remote=github.remote,
             env_for_repo=github.git_env,
+            push_payload_fn=github.push_payload if github.mock else None,
+            ls_remote_fn=github.ls_remote if github.mock else None,
         )
         service._lock = request.app.state.revisions._lock
         return service

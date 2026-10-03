@@ -15,6 +15,8 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import { hostedMode, hostedRequest } from "../hosted/api";
+import { AccountSettings } from "../hosted/AccountSettings";
 import { useApi } from "../state/api";
 import type {
   DeliveryMode,
@@ -455,6 +457,7 @@ function Home({
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [ownedRepos, setOwnedRepos] = useState<string[]>([]);
   const [repo, setRepo] = useState(demoMode ? "soren-labs/sbx-browser" : "");
   const [provider, setProvider] = useState(demoMode ? "codex" : "auto");
   const [model, setModel] = useState(demoMode ? "gpt-6.1-sol" : "auto");
@@ -468,6 +471,7 @@ function Home({
   const [error, setError] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
+    if (hostedMode) void hostedRequest("/hosted/repositories").then(data => setOwnedRepos(data.repositories.map((r: any) => r.name))).catch(e => setError(e.message));
     void Promise.all([api.listProviders(), api.listModels()])
       .then(([p, m]) => {
         setProviders(p);
@@ -586,7 +590,7 @@ function Home({
                       "soren-labs/docs",
                       "soren-labs/website",
                     ]
-                  : recentRepos
+                  : hostedMode ? ownedRepos : recentRepos
                 ).map((r) => (
                   <button
                     type="button"
@@ -1401,7 +1405,8 @@ function Settings() {
             ))}
           </div>
         </section>
-        <section className="settings-section">
+        {hostedMode && <AccountSettings />}
+        {!hostedMode && <section className="settings-section">
           <h2>Workspace connection</h2>
           <p>
             {demoMode
@@ -1443,7 +1448,7 @@ function Settings() {
               {saved && <span role="status">Connection saved.</span>}
             </form>
           )}
-        </section>
+        </section>}
         <section className="settings-section">
           <h2>Keyboard shortcuts</h2>
           <div className="shortcut-row">
