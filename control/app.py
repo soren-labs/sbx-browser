@@ -371,6 +371,8 @@ def create_app(
     auth_store: AuthStore | None = None,
     email_sender: EmailSender | None = None,
     auth_rate_limiter: AuthRateLimiter | None = None,
+    state_backend: str | None = None,
+    hosted: bool | None = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -382,6 +384,62 @@ def create_app(
     turn_max_seconds: int | None = None,
 ) -> FastAPI:
     backend_kind = os.environ.get("SBX_BACKEND", "local")
+    hosted = hosted if hosted is not None else os.environ.get("SBX_HOSTED") == "1"
+    state_backend = state_backend or os.environ.get(
+        "SBX_STATE_BACKEND", "postgres" if hosted else "legacy"
+    )
+    if state_backend not in {"postgres", "legacy"}:
+        raise ValueError("SBX_STATE_BACKEND must be postgres or legacy")
+    if hosted and state_backend != "postgres":
+        raise ValueError("hosted mode requires PostgreSQL state")
+    database_records = None
+    if state_backend == "postgres":
+        from control.auth_store import AuthDatabase
+        from control.postgres_state import (
+            DatabaseRecords,
+            PostgresActivityStore,
+            PostgresArtifactStore,
+            PostgresRevisionStore,
+            PostgresRunStore,
+            PostgresSessionStore,
+            PostgresTaskStore,
+            PostgresWorkflowStore,
+            PostgresWorkspaceStore,
+        )
+
+        if auth_store is None:
+            if not os.environ.get("DATABASE_URL"):
+                raise ValueError("PostgreSQL state requires DATABASE_URL")
+            auth_store = AuthStore(AuthDatabase.from_env())
+        database_records = DatabaseRecords(auth_store.database)
+        store = store if store is not None else PostgresSessionStore(database_records)
+        run_store = run_store if run_store is not None else PostgresRunStore(database_records)
+        run_activity_store = (
+            run_activity_store
+            if run_activity_store is not None
+            else PostgresActivityStore(database_records)
+        )
+        artifact_store = (
+            artifact_store
+            if artifact_store is not None
+            else PostgresArtifactStore(database_records)
+        )
+        workspace_store = (
+            workspace_store
+            if workspace_store is not None
+            else PostgresWorkspaceStore(database_records)
+        )
+        workflow_store = (
+            workflow_store
+            if workflow_store is not None
+            else PostgresWorkflowStore(database_records)
+        )
+        task_store = task_store if task_store is not None else PostgresTaskStore(database_records)
+        revision_store = (
+            revision_store
+            if revision_store is not None
+            else PostgresRevisionStore(database_records)
+        )
     backend = backend or _select_backend()
     store = store or _select_store()
     run_store = run_store or _select_run_store()
@@ -460,6 +518,8 @@ def create_app(
     app.include_router(api_v2_router)  # Session-first facade (SOR-256)
     app.include_router(hosted_auth_router)
     app.state.plane = plane
+    app.state.hosted_mode = hosted
+    app.state.database_records = database_records
     app.state.run_store = run_store
     app.state.run_ledger = plane.run_ledger
     plane.run_activity = run_activity_store
@@ -555,9 +615,14 @@ def create_app(
     from control.checkpoint import CheckpointService
 
     snapshot_provider = _select_snapshot_provider(backend)
+    checkpoint_store = _select_checkpoint_store() if database_records is None else None
+    if database_records is not None:
+        from control.postgres_state import PostgresCheckpointStore
+
+        checkpoint_store = PostgresCheckpointStore(database_records)
     app.state.checkpoints = CheckpointService(
         backend,
-        _select_checkpoint_store(),
+        checkpoint_store,
         snapshots=snapshot_provider,
         workspaces=workspaces,
         clock=clock,
@@ -573,9 +638,14 @@ def create_app(
     if os.environ.get("SBX_ENV_CACHE") == "1":
         from control.environment import EnvironmentService
 
+        environment_store = _select_environment_store() if database_records is None else None
+        if database_records is not None:
+            from control.postgres_state import PostgresEnvironmentStore
+
+            environment_store = PostgresEnvironmentStore(database_records)
         environments = EnvironmentService(
             backend,
-            _select_environment_store(),
+            environment_store,
             snapshots=snapshot_provider,
             setup=os.environ.get("SBX_ENV_SETUP") or "",
             clock=clock,

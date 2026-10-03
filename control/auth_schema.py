@@ -68,4 +68,15 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             attempts INTEGER NOT NULL
         )""",
     ),
+    (
+        """CREATE TABLE control_records (
+            namespace TEXT NOT NULL,
+            id TEXT NOT NULL,
+            owner TEXT,
+            payload TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY(namespace, id)
+        )""",
+        "CREATE INDEX control_records_owner_idx ON control_records(namespace, owner)",
+    ),
 )

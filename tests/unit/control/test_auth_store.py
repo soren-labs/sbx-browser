@@ -225,13 +225,14 @@ def test_concurrent_schema_initialization_is_idempotent(tmp_path):
         "password_credentials",
         "email_verification_challenges",
         "auth_rate_limits",
+        "control_records",
     }
 
 
 def test_newer_or_noncontiguous_schema_is_rejected(auth):
     auth.database.initialize()
     with sqlite3.connect(auth.database._path) as conn:
-        conn.execute("INSERT INTO auth_schema_migrations VALUES (3, 'now')")
+        conn.execute("INSERT INTO auth_schema_migrations VALUES (?, 'now')", (len(MIGRATIONS) + 1,))
     with pytest.raises(AuthStorageUnavailable, match="schema version"):
         reopen(auth).database.initialize()
 

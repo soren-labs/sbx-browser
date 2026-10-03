@@ -8,6 +8,7 @@ inject real implementations; absent attributes get in-memory defaults from
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from typing import Any
 
 from fastapi import Depends, Request
@@ -36,7 +37,11 @@ from control.workspace import InMemoryWorkspaceStore, WorkspaceService
 
 def get_plane(request: Request) -> Any:
     """The shared SessionService (P1 ``ControlPlane``), same as ``/api/*``."""
-    return request.app.state.plane
+    from control.ownership import ScopedControlPlane, request_user_id
+
+    plane = request.app.state.plane
+    user_id = request_user_id(request)
+    return ScopedControlPlane(plane, user_id) if user_id else plane
 
 
 def get_v1_state(request: Request) -> V1State:
@@ -232,6 +237,13 @@ def get_artifact_store(request: Request) -> Any:
     if store is None:
         store = InMemoryArtifactStore()
         request.app.state.artifact_store = store
+    from control.ownership import ScopedArtifactStore, ScopedSessionStore, request_user_id
+
+    user_id = request_user_id(request)
+    if user_id:
+        return ScopedArtifactStore(
+            store, ScopedSessionStore(request.app.state.plane.store, user_id)
+        )
     return store
 
 
@@ -382,21 +394,48 @@ def get_workflow_service(
 
 
 def api_key(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     store: ApiKeyStore = Depends(get_key_store),
 ) -> ApiKey:
     """Any valid (unrevoked) ``sbx_`` key; 401 otherwise."""
     key = lookup_key(store, bearer_token(credentials))
+    if key is None and credentials is None and getattr(request.app.state, "hosted_mode", False):
+        from control.auth_store import UserApiKey
+        from control.hosted_auth_routes import COOKIE_NAME, same_origin_json
+
+        session = request.app.state.auth_store.lookup_session(request.cookies.get(COOKIE_NAME, ""))
+        if session is not None:
+            from control.hosted_auth import HostedAuthError
+
+            try:
+                same_origin_json(request)
+            except HostedAuthError as exc:
+                raise V1ApiError(exc.status, exc.code, exc.code) from None
+            key = UserApiKey(
+                id=session.id,
+                key_hash="",
+                label="browser",
+                scopes=("agents",),
+                created_at=session.created_at,
+                user_id=session.user_id,
+            )
     if key is None:
         raise V1ApiError(401, "unauthorized", "missing or invalid bearer token")
     return key
 
 
-def agents_key(key: ApiKey = Depends(api_key)) -> ApiKey:
+def agents_key(request: Request, key: ApiKey = Depends(api_key)) -> ApiKey:
     """Key with the ``agents`` scope (agent / run / meta endpoints)."""
     if not has_scope(key, "agents"):
         raise V1ApiError(403, "forbidden", "api key lacks required scope 'agents'")
-    return key
+    user_id = getattr(key, "user_id", None)
+    if getattr(request.app.state, "hosted_mode", False) and user_id is None:
+        raise V1ApiError(403, "forbidden", "hosted product access requires a user-owned credential")
+    # Every existing resource handler already uses key.id as its ownership
+    # boundary. Normalize only this product dependency; key metadata/admin
+    # endpoints retain the actual API key ID and legacy operator semantics.
+    return replace(key, id=user_id) if user_id is not None else key
 
 
 def admin_key(key: ApiKey = Depends(api_key)) -> ApiKey:

@@ -241,3 +241,22 @@ def test_postgres_hosted_concurrent_consumption_has_one_winner(postgres, operati
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(consume, range(8)))
     assert sum(result is not None for result in results) == 1
+
+
+def test_postgres_business_state_and_owner_survive_database_restart(postgres):
+    from control.postgres_state import DatabaseRecords, PostgresWorkflowStore
+    from control.workflow_store import WorkflowTaskRecord
+
+    url, stop, start = postgres
+    auth = AuthStore(AuthDatabase(database_url=url))
+    user = auth.create_user(email="pg-business-state@example.test")
+    records = DatabaseRecords(auth.database)
+    records.put_owned("connections", "pg-connection", user.id, {"status": "connected"})
+    store = PostgresWorkflowStore(records)
+    store.attach(WorkflowTaskRecord(user.id, "pg-workflow", "task", "author", "pg-agent"))
+    stop()
+    start()
+    restored = DatabaseRecords(AuthDatabase(database_url=url))
+    assert restored.get("connections", "pg-connection", owner=user.id) == {"status": "connected"}
+    assert restored.get("connections", "pg-connection", owner="other") is None
+    assert len(PostgresWorkflowStore(restored).list_workflow(user.id, "pg-workflow")) == 1

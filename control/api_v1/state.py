@@ -365,6 +365,12 @@ class V1State:
         """
         if store is None:
             return 0
+        from control.ownership import ScopedSessionStore
+
+        # This is trusted scheduler housekeeping across all users, not a
+        # resource read. A scoped miss must not release another user's lease.
+        if isinstance(store, ScopedSessionStore):
+            store = store.source
         now = time.monotonic()
         if now - self.leases_reconciled_at < interval_s:
             return 0
