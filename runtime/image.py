@@ -531,6 +531,13 @@ def _cli_image(
     return layered
 
 
+def sbx_hosted_runtime_image(spec: PackageSpec | None = None):
+    """Codex-first hosted image: existing runner plus its read-only HTTP service."""
+    return sbx_runtime_image(spec).pip_install(
+        "fastapi>=0.115.0", "uvicorn>=0.32.0", "pyjwt>=2.10.0"
+    )
+
+
 def sbx_antigravity_image(agy_bin: Path | None = None, spec: PackageSpec | None = None):
     """Named Modal Image ``sbx-runtime-antigravity`` (SOR-62/SOR-80 fast path).
 

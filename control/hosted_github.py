@@ -276,6 +276,7 @@ class GitHubScopedBackend:
                 lease = broker.lease(handle.tags.get("owner", ""))
                 outgoing["SBX_ACCOUNT_CREDENTIAL"] = json.dumps(lease.blob())
                 outgoing["SBX_ACCOUNT_ID"] = lease.connection_id
+                outgoing["SBX_HOSTED_CREDENTIAL_LEASE"] = "1"
         repo = outgoing.pop("SBX_GITHUB_REPO", None)
         workspace = self.workspace_store.get(handle.tags.get("session_id", ""))
         repo = repo or (workspace.repo if workspace else None)

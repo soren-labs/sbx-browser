@@ -2521,7 +2521,7 @@ def _capability_rows(registry: AccountRegistry, capabilities: Any) -> list[dict[
     availability, discovery provenance (``source``/``refreshed_at``/
     ``stale``) — plus ``accounts_available`` for compatibility.
     """
-    enabled = frozenset(selected_providers())
+    enabled = frozenset({"codex"} if getattr(registry, "hosted", False) else selected_providers())
     rows: list[dict[str, Any]] = []
     for account in registry.list():
         # Durable registries can retain accounts from an earlier deployment

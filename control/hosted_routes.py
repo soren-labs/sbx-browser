@@ -194,3 +194,14 @@ def codex_refresh(request: Request, owner: str = Depends(user_id)):
 @router.delete("/connections/codex")
 def codex_disable(request: Request, owner: str = Depends(user_id)):
     return {"connection": request.app.state.codex_broker.disable(owner).public()}
+
+
+@router.post("/sessions/{session_id}/connect")
+def sandbox_connect(session_id: str, request: Request, owner: str = Depends(user_id)):
+    task = request.app.state.task_store.get(session_id)
+    if task is None or task.owner != owner:
+        raise HostedAuthError("not_found", 404)
+    agent = request.app.state.plane.store.get(task.agent_id) if task.agent_id else None
+    if agent is None or agent.owner != owner or agent.handle() is None:
+        raise HostedAuthError("sandbox_unavailable", 409)
+    return request.app.state.plane.backend.connect(agent.handle())

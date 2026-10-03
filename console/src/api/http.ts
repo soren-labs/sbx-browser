@@ -1,4 +1,5 @@
 import { mergeActivity } from "../prototype/session-state";
+import { hostedMode } from "../hosted/api";
 import { cacheScope, readSessionCache, writeSessionCache } from "../prototype/session-cache";
 import { ApiError, type SessionApi, type SessionEventHandlers } from "./client";
 import {
@@ -68,6 +69,7 @@ const TOKEN_KEY = "sbx.console.token";
  * wires auth. Stored in localStorage only; never sent anywhere except the
  * configured control plane. */
 export function getToken(): string {
+  if (hostedMode) return "";
   try {
     return localStorage.getItem(TOKEN_KEY) ?? "";
   } catch {
@@ -362,7 +364,7 @@ export class HttpSessionApi implements SessionApi {
           ...extraHeaders,
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
-        credentials: "omit",
+        credentials: hostedMode ? "include" : "omit",
       });
     } catch {
       throw new ApiError("network", "network request failed", {
@@ -419,9 +421,11 @@ export class HttpSessionApi implements SessionApi {
   }
 
   async readSessionCache(id: string) {
+    if (hostedMode) return null;
     return readSessionCache(await cacheScope(this.base, getToken()), id);
   }
   async writeSessionCache(session: Session) {
+    if (hostedMode) return;
     writeSessionCache(await cacheScope(this.base, getToken()), session);
   }
   async getHistory(id: string, before: number) {
@@ -677,6 +681,7 @@ export class HttpSessionApi implements SessionApi {
     let abort: AbortController | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let sawDisconnect = false;
+    let statusTimer: ReturnType<typeof setInterval> | null = null;
 
     const pending = new Map<string, ActivityItem>();
     let paint: number | null = null;
@@ -780,15 +785,52 @@ export class HttpSessionApi implements SessionApi {
       if (closed) return;
       abort = new AbortController();
       try {
-        const res = await fetch(`${this.base}${PATHS.events(sessionId)}${handlers.historyAfterTurn ? `?after_n=${handlers.historyAfterTurn}` : ""}`, {
-          headers: {
+        let url = `${this.base}${PATHS.events(sessionId)}${handlers.historyAfterTurn ? `?after_n=${handlers.historyAfterTurn}` : ""}`;
+        let directGrant: string | null = null;
+        if (hostedMode) {
+          try {
+            let connection: any = null;
+            const deadline = Date.now() + 5000;
+            while (!closed && !connection) {
+              try { connection = await this.request<any>("POST", `/hosted/sessions/${encodeURIComponent(sessionId)}/connect`, {}); }
+              catch (error) {
+                if (!(error instanceof ApiError) || error.httpStatus !== 409 || Date.now() >= deadline) throw error;
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+            }
+            if (closed) return;
+            url = connection.url; directGrant = connection.grant;
+            if (statusTimer === null) statusTimer = setInterval(() => {
+              void this.getSession(sessionId).then(session => {
+                handlers.onSession?.(session); handlers.onPhase?.(session.phase);
+              }).catch(() => {});
+            }, 1000);
+          } catch { /* Provisioning/unreachable runtime: use the relayed stream. */ }
+        }
+        const streamHeaders = directGrant ? {
+          Authorization: `Bearer ${directGrant}`, Accept: "text/event-stream",
+          ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
+        } : {
             ...this.headers(),
             Accept: "text/event-stream",
             ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
-          },
-          credentials: "omit",
-          signal: abort.signal,
-        });
+        };
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            headers: streamHeaders,
+            credentials: directGrant ? "omit" : hostedMode ? "include" : "omit",
+            signal: abort.signal,
+          });
+          if (directGrant && !res.ok) throw new Error("direct runtime unavailable");
+        } catch (error) {
+          if (!directGrant || abort.signal.aborted) throw error;
+          res = await fetch(`${this.base}${PATHS.events(sessionId)}`, {
+            headers: {...this.headers(), Accept: "text/event-stream", ...(lastEventId ? {"Last-Event-ID": lastEventId} : {})},
+            credentials: "include",
+            signal: abort.signal,
+          });
+        }
         if (!res.ok) {
           let code = "internal";
           try {
@@ -876,6 +918,7 @@ export class HttpSessionApi implements SessionApi {
       if (paint !== null) cancelAnimationFrame(paint);
       if (fallback !== null) clearTimeout(fallback);
       if (retryTimer) clearTimeout(retryTimer);
+      if (statusTimer) clearInterval(statusTimer);
       abort?.abort();
     };
   }

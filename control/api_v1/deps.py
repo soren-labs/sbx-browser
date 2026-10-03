@@ -237,6 +237,11 @@ def get_runtime_store(request: Request) -> Any:
     in-memory store locally. A provider with no record reads ``unknown``;
     the store never fabricates ``ready``.
     """
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.hosted_accounts import HostedRuntimeEvidence
+        from control.ownership import request_user_id
+
+        return HostedRuntimeEvidence(request.app.state.connections, request_user_id(request))
     store = getattr(request.app.state, "runtime_store", None)
     if store is None:
         from control.runtime_state import select_runtime_store
@@ -482,6 +487,14 @@ def agents_key(request: Request, key: ApiKey = Depends(api_key)) -> ApiKey:
     user_id = getattr(key, "user_id", None)
     if getattr(request.app.state, "hosted_mode", False) and user_id is None:
         raise V1ApiError(403, "forbidden", "hosted product access requires a user-owned credential")
+    if (
+        getattr(request.app.state, "hosted_mode", False)
+        and request.method == "POST"
+        and request.url.path in {"/v2/sessions", "/v1/tasks", "/v1/agents"}
+    ):
+        runtime = request.app.state.connections.get(user_id, "modal")
+        if runtime is None or runtime.state != "ready":
+            raise V1ApiError(409, "account_unavailable", "connect Modal and provision your runtime")
     # Every existing resource handler already uses key.id as its ownership
     # boundary. Normalize only this product dependency; key metadata/admin
     # endpoints retain the actual API key ID and legacy operator semantics.

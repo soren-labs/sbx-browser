@@ -377,6 +377,7 @@ def create_app(
     modal_provider: Any = None,
     github_factory: Any = None,
     codex_provider: Any = None,
+    compute_provider: Any = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -485,6 +486,18 @@ def create_app(
             mock=os.environ.get("SBX_CONNECTIONS_MODE") == "mock",
             factory=github_factory,
         )
+        from control.hosted_compute import (
+            FakeComputeProvider,
+            HostedModalBackend,
+            UnconfiguredComputeProvider,
+        )
+
+        compute_provider = compute_provider or (
+            FakeComputeProvider(backend, clock=lambda: auth_store.clock())
+            if os.environ.get("SBX_CONNECTIONS_MODE") == "mock"
+            else UnconfiguredComputeProvider()
+        )
+        backend = HostedModalBackend(hosted_connections, compute_provider)
         backend = GitHubScopedBackend(backend, github_connections, workspace_store)
     workspaces = WorkspaceService(backend, workspace_store, clock=clock)
     handoffs = HandoffService(workspaces, HandoffStoreView(artifact_store))
@@ -533,6 +546,9 @@ def create_app(
         finally:
             if hosted:
                 app.state.codex_broker.stop()
+                stop_compute = getattr(compute_provider, "stop", None)
+                if stop_compute:
+                    stop_compute()
             if refresher is not None:
                 refresher.stop()
 
@@ -546,6 +562,7 @@ def create_app(
     app.state.plane = plane
     app.state.hosted_mode = hosted
     app.state.database_records = database_records
+    app.state.compute_provider = compute_provider
     app.state.run_store = run_store
     app.state.run_ledger = plane.run_ledger
     plane.run_activity = run_activity_store

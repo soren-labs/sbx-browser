@@ -1099,7 +1099,11 @@ def resolve_execution(
     effort_req = effort_req if effort_req not in (None, "", "auto") else None
     account_req = account_req if account_req not in (None, "", "auto") else None
 
-    enabled = tuple(p for p in selected_providers(env) if p in CANONICAL_PROVIDERS)
+    enabled = (
+        ("codex",)
+        if getattr(registry, "hosted", False)
+        else tuple(p for p in selected_providers(env) if p in CANONICAL_PROVIDERS)
+    )
 
     if provider_req is not None and provider_req not in CANONICAL_PROVIDERS:
         raise TaskRefusal(400, "invalid_provider", f"unknown provider {provider_req!r}")

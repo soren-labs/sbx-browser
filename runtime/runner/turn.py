@@ -44,6 +44,7 @@ from runtime.runner.contract import (
     evaluate_output,
     load_contract_file,
 )
+from runtime.runner.credentials import CredentialError, restore_credential_blob, sandbox_home
 from runtime.runner.events import (
     TurnState,
     parse_event_line,
@@ -146,6 +147,13 @@ def cmd_turn(
     started = time.monotonic()
     session = load_session(root)
     provider = session.get("provider") or "codex"
+    # Hosted turns receive a fresh access-only lease, including resumed turns.
+    if os.environ.get("SBX_HOSTED_CREDENTIAL_LEASE") == "1":
+        try:
+            restore_credential_blob(sandbox_home(root), provider=provider, codex_home=home)
+        except CredentialError:
+            emit(root, {"type": "sbx.error", "message": "invalid credential lease"})
+            return EXIT_INTERNAL
     try:
         adapter = get_adapter(provider)
     except KeyError as exc:

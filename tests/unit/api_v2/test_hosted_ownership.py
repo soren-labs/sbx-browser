@@ -36,6 +36,11 @@ def hosted_app(credentialed, tmp_path, stub_runner, monkeypatch):
             max_concurrent=64,
         )
         for user in users:
+            if app.state.connections.get(user.id, "modal") is None:
+                app.state.connections.connect(
+                    user.id, "modal", {"token_id": "REDACTED", "token_secret": "REDACTED"}
+                )
+                app.state.modal_connections.provision(user.id)
             if app.state.connections.get(user.id, "codex") is None:
                 state = app.state.codex_broker.authorize(user.id)["state"]
                 app.state.codex_broker.callback(user.id, state, f"mock:{user.id}")
@@ -154,3 +159,81 @@ def test_three_live_sessions_share_owned_codex_connection_without_rotation_races
                 == 200
             )
         assert app.state.plane.credential_sync is None
+
+
+def test_user_modal_runtime_direct_grants_and_reconstruction(hosted_app):
+    import httpx
+    import jwt
+
+    factory, _, users, tokens, _ = hosted_app
+    app = factory()
+    with TestClient(app, base_url="https://testserver") as client:
+        result = create_session(client, headers(tokens[0]))
+        session_id = result["session"]["id"]
+        wait_session(client, headers(tokens[0]), session_id, "finished", "failed")
+        response = client.post(
+            f"/hosted/sessions/{session_id}/connect", json={}, headers=headers(tokens[0])
+        )
+        assert response.status_code == 200
+        connection = response.json()
+        claims = jwt.decode(connection["grant"], options={"verify_signature": False})
+        assert claims["exp"] - claims["iat"] == 60 and claims["sub"] == users[0].id
+        assert (
+            client.post(
+                f"/hosted/sessions/{session_id}/connect", json={}, headers=headers(tokens[1])
+            ).status_code
+            == 404
+        )
+        with httpx.stream(
+            "GET", connection["url"], headers={"Authorization": f"Bearer {connection['grant']}"}
+        ) as stream:
+            assert stream.status_code == 200
+            frame = next(line for line in stream.iter_lines() if line.startswith("data:"))
+            assert "turn.started" in frame or "session.meta" in frame
+        assert (
+            httpx.get(connection["url"], headers={"Authorization": "Bearer REDACTED"}).status_code
+            == 401
+        )
+        task = app.state.task_store.get(session_id)
+        agent = app.state.plane.store.get(task.agent_id)
+        assert (
+            agent.sandbox_tags["modal_workspace"]
+            == app.state.connections.get(users[0].id, "modal").metadata["workspace"]
+        )
+        link = app.state.database_records.get(
+            "hosted_sandboxes", agent.sandbox_id, owner=users[0].id
+        )
+        assert link["agent_id"] == agent.id and link["state"] == "live"
+        assert "key" not in link and "key_cipher" in link
+        assert (
+            client.get(f"/v2/sessions/{session_id}/history", headers=headers(tokens[0])).status_code
+            == 200
+        )
+    with TestClient(factory(), base_url="https://testserver") as restored:
+        connected = restored.post(
+            f"/hosted/sessions/{session_id}/connect", json={}, headers=headers(tokens[0])
+        )
+        assert connected.status_code == 200
+        assert (
+            connected.json()["url"] != connection["url"]
+        )  # fresh fake HTTP endpoint, same durable Session
+        assert (
+            restored.get(f"/v2/sessions/{session_id}", headers=headers(tokens[0])).status_code
+            == 200
+        )
+
+
+def test_hosted_creation_requires_users_ready_modal_runtime(hosted_app):
+    factory, _, users, tokens, _ = hosted_app
+    app = factory()
+    modal = app.state.connections.get(users[0].id, "modal")
+    modal.state = "connected"
+    app.state.connections.save(modal)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v2/sessions",
+            json={"prompt": "hello", "execution": {"provider": "codex"}},
+            headers=headers(tokens[0]),
+        )
+        assert response.status_code == 409
+        assert app.state.task_store.list(owner=users[0].id) == []

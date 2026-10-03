@@ -11,6 +11,8 @@ from control.scheduler import AccountScheduler, session_running_source
 
 
 class HostedAccounts:
+    hosted = True
+
     def __init__(self, broker: CodexBroker, owner: str | None = None):
         self.broker, self.owner = broker, owner
         self.records = DatabaseRecords(broker.store.auth.database)
@@ -134,3 +136,23 @@ class HostedScheduling:
                     external_running=session_running_source(self.sessions),
                 )
             return self._items[owner]
+
+
+class HostedRuntimeEvidence:
+    def __init__(self, connections, owner):
+        self.connections, self.owner = connections, owner
+
+    def get(self, provider):
+        from control.runtime_state import ProviderRuntimeRecord
+
+        record = self.connections.get(self.owner, "modal") if self.owner else None
+        if provider != "codex" or record is None:
+            return None
+        return ProviderRuntimeRecord(
+            provider,
+            "ready" if record.state == "ready" else "degraded",
+            record.metadata.get("image", ""),
+            record.metadata.get("runtime_version"),
+            "Your Modal runtime",
+            record.updated_at,
+        )

@@ -83,6 +83,25 @@ def test_resume_scenario(work: Path, runner_env: dict[str, str]) -> None:
     assert set(turn2["usage"]) == USAGE_FIELDS
 
 
+def test_hosted_followup_restores_rotated_access_lease(work, runner_env):
+    import secrets
+
+    init_runner(runner_env)
+    runner_env["SBX_HOSTED_CREDENTIAL_LEASE"] = "1"
+    tokens = [secrets.token_urlsafe(24), secrets.token_urlsafe(24)]
+    for n, token in enumerate(tokens, 1):
+        content = json.dumps({"tokens": {"access_token": token}})
+        runner_env["SBX_ACCOUNT_CREDENTIAL"] = json.dumps(
+            {"provider": "codex", "files": {".codex/auth.json": content}}
+        )
+        code, _, _ = _turn(runner_env, work, n=n)
+        assert code == 0
+        auth_file = Path(runner_env["CODEX_HOME"]) / "auth.json"
+        assert auth_file.read_text() == content
+        assert auth_file.stat().st_mode & 0o777 == 0o600
+        assert token not in (work / "events.jsonl").read_text()
+
+
 def test_nonzero_scenario(work: Path, runner_env: dict[str, str]) -> None:
     init_runner(runner_env)
     runner_env["FAKE_CODEX_SCENARIO"] = "nonzero"
