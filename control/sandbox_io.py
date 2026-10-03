@@ -154,7 +154,11 @@ def sandbox_env(
     # the token + credential-helper wiring is forwarded here for every exec —
     # runner (the agent sees it) and control-plane git ops alike. SOR-177:
     # ``github_repo`` scopes GitHub App mints to the authorizing repo.
-    env.update(github.exec_env(repo=github_repo))
+    if handle.tags.get("hosted") == "1":
+        if github_repo:
+            env["SBX_GITHUB_REPO"] = github_repo
+    else:
+        env.update(github.exec_env(repo=github_repo))
     if extra:
         safe_extra = dict(extra)
         # Never let callers re-introduce credentials that violate the

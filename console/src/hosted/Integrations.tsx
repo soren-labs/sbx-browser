@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { GitHubConnection } from "./GitHubConnection";
 import { hostedRequest, type HostedConnection } from "./api";
 
 export function HostedIntegrations() {
@@ -65,5 +66,6 @@ export function HostedIntegrations() {
       <button disabled={busy || !configured} onClick={oauth}>Connect with Modal authorization</button>
       {connection && <button disabled={busy} onClick={() => void action(provision)}>Reconcile runtime</button>}
     </section>
+    <GitHubConnection />
   </div></div>;
 }

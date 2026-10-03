@@ -292,6 +292,13 @@ def get_github_app(request: Request) -> Any:
     when a test/deploy injects one, else the env-configured default —
     shared with the sandbox injection seam so token/record caches are one.
     """
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.ownership import request_user_id
+
+        owner = request_user_id(request)
+        if owner is None:
+            raise V1ApiError(401, "unauthorized", "user authentication required")
+        return request.app.state.github_connections.for_user(owner)
     service = getattr(request.app.state, "github_app", None)
     if service is None:
         from control import github_app
@@ -352,6 +359,20 @@ def get_revisions(request: Request) -> Any:
     """SOR-225 RevisionService bound to the durable artifact + workspace
     seams: ``app.state.revisions`` when the app wired one, else built over
     the same stores a test injected."""
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.revisions import RevisionService
+
+        github = get_github_app(request)
+        service = RevisionService(
+            get_revision_store(request),
+            get_artifact_store(request),
+            workspaces=get_workspaces(request),
+            env={},
+            remote=github.remote,
+            env_for_repo=github.git_env,
+        )
+        service._lock = request.app.state.revisions._lock
+        return service
     service = getattr(request.app.state, "revisions", None)
     if service is None:
         from control.revisions import RevisionService
@@ -369,6 +390,12 @@ def get_repo_resolver(request: Request) -> Any:
     """SOR-222/223 repo probe: ``app.state.repo_resolver`` when a test or
     deploy injects one (fake probes keep unit tests offline); else the
     GitHub-API → ``git ls-remote`` chain over the process env."""
+    if getattr(request.app.state, "hosted_mode", False):
+        from control.hosted_github import UserRepoResolver
+
+        return UserRepoResolver(
+            get_github_app(request), getattr(request.app.state, "repo_resolver", None)
+        )
     resolver = getattr(request.app.state, "repo_resolver", None)
     if resolver is None:
         from control.tasks import default_repo_resolver

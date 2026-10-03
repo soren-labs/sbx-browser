@@ -40,12 +40,10 @@ def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_two_keys_and_browser_share_one_users_resources_and_restart(hosted_app, git_repo):
+def test_two_keys_and_browser_share_one_users_resources_and_restart(hosted_app):
     factory, auth, users, tokens, second = hosted_app
     with TestClient(factory(), base_url="https://testserver") as client:
-        session = create_session(client, headers(tokens[0]), repository={"repo": git_repo[0]})[
-            "session"
-        ]
+        session = create_session(client, headers(tokens[0]))["session"]
         session_id = session["id"]
         result = wait_session(client, headers(second), session_id, "finished", "failed")
         assert result["session"]["status"] == "finished", result
@@ -81,7 +79,7 @@ def test_two_keys_and_browser_share_one_users_resources_and_restart(hosted_app, 
         record = client.app.state.task_store.get(session_id)
         assert client.app.state.run_store.list(record.agent_id)
         assert client.app.state.plane.store.get(record.agent_id).owner == users[0].id
-        assert client.app.state.workspace_store.get(record.agent_id).prepared
+        assert client.app.state.workspace_store.get(record.agent_id) is None
 
 
 def test_hosted_product_rejects_ownerless_operator_keys(hosted_app):

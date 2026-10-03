@@ -32,10 +32,13 @@ class AuthRoute(APIRoute):
 
         async def safe_handler(request: Request) -> Response:
             from control.api_v1.errors import V1ApiError
+            from control.github_app import GitHubAppError
 
             try:
                 response = await handler(request)
             except V1ApiError as exc:
+                response = JSONResponse({"error": exc.code}, status_code=exc.status_code)
+            except GitHubAppError as exc:
                 response = JSONResponse({"error": exc.code}, status_code=exc.status_code)
             except RequestValidationError:
                 # FastAPI's default validation response includes rejected input,

@@ -375,6 +375,7 @@ def create_app(
     hosted: bool | None = None,
     connection_vault: Any = None,
     modal_provider: Any = None,
+    github_factory: Any = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -469,6 +470,21 @@ def create_app(
     # (``plane.idle_timeout_s`` is the post-session retention only; the
     # sandbox's native bound is ``lifecycle.sandbox_idle_timeout_s``).
     lifecycle = lifecycle_config()
+    hosted_connections = None
+    github_connections = None
+    if hosted:
+        from control.connections import ConnectionStore, SecretVault
+        from control.hosted_github import GitHubScopedBackend, HostedGitHub
+
+        hosted_connections = ConnectionStore(
+            auth_store, connection_vault if connection_vault is not None else SecretVault.from_env()
+        )
+        github_connections = HostedGitHub(
+            hosted_connections,
+            mock=os.environ.get("SBX_CONNECTIONS_MODE") == "mock",
+            factory=github_factory,
+        )
+        backend = GitHubScopedBackend(backend, github_connections, workspace_store)
     workspaces = WorkspaceService(backend, workspace_store, clock=clock)
     handoffs = HandoffService(workspaces, HandoffStoreView(artifact_store))
     plane = ControlPlane(
@@ -698,7 +714,8 @@ def create_app(
         UnconfiguredModalProvider,
     )
 
-    app.state.connections = ConnectionStore(
+    app.state.github_connections = github_connections
+    app.state.connections = hosted_connections or ConnectionStore(
         app.state.auth_store,
         connection_vault if connection_vault is not None else SecretVault.from_env(),
     )

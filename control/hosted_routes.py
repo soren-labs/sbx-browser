@@ -89,3 +89,60 @@ def mock_modal_approve(body: StateBody, request: Request, owner: str = Depends(u
 @router.post("/connections/modal/provision")
 def provision_modal(request: Request, owner: str = Depends(user_id)):
     return {"connection": request.app.state.modal_connections.provision(owner)}
+
+
+class GitHubCallbackBody(StateBody):
+    installation_id: int = Field(gt=0)
+
+
+@router.get("/connections/github")
+def github_status(request: Request, owner: str = Depends(user_id)):
+    return request.app.state.github_connections.for_user(owner).status()
+
+
+@router.post("/connections/github/authorize")
+def github_authorize(request: Request, owner: str = Depends(user_id)):
+    return request.app.state.github_connections.for_user(owner).begin_authorization()
+
+
+@router.post("/connections/github/callback")
+def github_callback(body: GitHubCallbackBody, request: Request, owner: str = Depends(user_id)):
+    service = request.app.state.github_connections.for_user(owner)
+    record = service.complete_authorization(body.installation_id, body.state.get_secret_value())
+    return {"installation": record.public()}
+
+
+@router.post("/connections/github/mock-approve")
+def github_mock_approve(body: StateBody, request: Request, owner: str = Depends(user_id)):
+    service = request.app.state.github_connections.for_user(owner)
+    if not service.mock:
+        raise HostedAuthError("not_found", 404)
+    record = service.complete_authorization(
+        service._client.installation_id, body.state.get_secret_value()
+    )
+    return {"installation": record.public()}
+
+
+@router.get("/repositories")
+def github_repositories(request: Request, owner: str = Depends(user_id)):
+    service = request.app.state.github_connections.for_user(owner)
+    return {
+        "repositories": [
+            {
+                "repo": f"https://github.com/{repo}",
+                "name": repo,
+                "installation_id": installation.installation_id,
+            }
+            for installation in service._store.list()
+            if not installation.suspended
+            for repo in installation.repositories
+        ]
+    }
+
+
+@router.delete("/connections/github/installations/{installation_id}")
+def github_disconnect(installation_id: int, request: Request, owner: str = Depends(user_id)):
+    service = request.app.state.github_connections.for_user(owner)
+    if service._store.get(installation_id) is None:
+        raise HostedAuthError("not_found", 404)
+    return service.revoke(installation_id)

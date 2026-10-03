@@ -655,11 +655,13 @@ class RevisionService:
         env: Mapping[str, str] | None = None,
         remote: Any = None,
         clock: Callable[[], datetime] | None = None,
+        env_for_repo: Any = None,
     ) -> None:
         self._store = store
         self._artifacts = artifacts
         self._workspaces = workspaces
         self._env_map = env
+        self._env_for_repo = env_for_repo
         self._remote = remote
         self._clock = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
@@ -669,7 +671,9 @@ class RevisionService:
     def _now(self) -> str:
         return self._clock().isoformat()
 
-    def _env(self) -> Mapping[str, str]:
+    def _env(self, repo: str | None = None) -> Mapping[str, str]:
+        if self._env_for_repo is not None and repo is not None:
+            return self._env_for_repo(repo)
         return self._env_map if self._env_map is not None else os.environ
 
     def _remote_for(self, repo: str, *, require_token: bool = False) -> RemoteGitHub | None:
@@ -683,7 +687,7 @@ class RevisionService:
         """
         remote = self._remote
         if remote is None:
-            token = github_remote.server_token(repo, self._env())
+            token = github_remote.server_token(repo, self._env(repo))
             if require_token and token is None:
                 return None
             return RemoteGitHub(token)
@@ -796,7 +800,9 @@ class RevisionService:
             if is_commit_sha(sha):
                 return f"refs/pull/{number}/head", sha
         ref = f"refs/pull/{number}/head"
-        sha = github_remote.ls_remote(f"https://github.com/{slug}", ref, env=self._env())
+        sha = github_remote.ls_remote(
+            f"https://github.com/{slug}", ref, env=self._env(f"https://github.com/{slug}")
+        )
         if not is_commit_sha(sha):
             raise RevisionError(
                 REPO_UNAVAILABLE,
@@ -1210,7 +1216,7 @@ class RevisionService:
                 base_sha=revision.base_sha,
                 head_sha=revision.head_sha,
                 base_ref=base_ref,
-                env=self._env(),
+                env=self._env(repo),
                 # Pin the delivery commit's dates so a retry after a
                 # crash between push and record re-mints the identical
                 # sha and converges instead of non-FF failing.
@@ -1565,7 +1571,9 @@ class RevisionService:
             pull_draft = pull.get("draft") is True
         except RemoteGitHubError:
             # API unreachable (e.g. local dev): ls-remote is the same truth.
-            remote_sha = github_remote.ls_remote(repo, f"refs/pull/{number}/head", env=self._env())
+            remote_sha = github_remote.ls_remote(
+                repo, f"refs/pull/{number}/head", env=self._env(repo)
+            )
         if pull_draft:
             # A draft PR can never merge — say so in canonical shape instead
             # of letting GitHub's 405 escape as an unstructured 500.

@@ -15,11 +15,12 @@ from control.hosted_auth_routes import COOKIE_NAME
 from control.modal_connection import FakeModalProvider
 
 
-def test_browser_connects_modal_and_shows_ready(tmp_path):
+def test_browser_connects_modal_and_github(tmp_path, monkeypatch):
     playwright = pytest.importorskip("playwright.sync_api")
     if not Path("console/dist/index.html").is_file():
         pytest.skip("build the console with VITE_HOSTED=1 before this optional smoke")
     auth = AuthStore(AuthDatabase(path=tmp_path / "auth.db"))
+    monkeypatch.setenv("SBX_CONNECTIONS_MODE", "mock")
     user = auth.create_user(email="modal-browser@example.test")
     token = auth.create_session(user.id)[1]
     app = create_app(
@@ -64,6 +65,10 @@ def test_browser_connects_modal_and_shows_ready(tmp_path):
                 playwright.expect(page.get_by_text("smoke: complete")).to_be_visible()
                 page.reload()
                 playwright.expect(page.get_by_role("status")).to_have_text("Ready")
+                page.get_by_role("button", name="Connect GitHub", exact=True).click()
+                account = app.state.github_connections.for_user(user.id)._client.login
+                playwright.expect(page.get_by_text(f"Connected: {account}")).to_be_visible()
+                playwright.expect(page.get_by_text(f"{account}/alpha", exact=True)).to_be_visible()
             finally:
                 browser.close()
     finally:

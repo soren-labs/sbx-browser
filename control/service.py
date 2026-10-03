@@ -583,6 +583,8 @@ class ControlPlane:
                 raise SessionConflict("session_not_runnable")
             stored.sandbox_id = handle.id
             stored.sandbox_root = str(handle.root)
+            if handle.tags.get("hosted") == "1":
+                stored.sandbox_tags = dict(handle.tags)
             # SOR-180: persist the Secret *refs* this sandbox was created
             # with — a checkpoint restore re-declares them so the fresh
             # sandbox mounts the same credential/resource channels.
