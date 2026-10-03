@@ -128,7 +128,7 @@ class SPAStaticFiles(StaticFiles):
     Content-hashed ``assets/*`` cache immutably; everything else revalidates.
     """
 
-    _API_PREFIXES = ("v1", "v2", "api", "auth", ".well-known")
+    _API_PREFIXES = ("v1", "v2", "api", "auth", "hosted", ".well-known")
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
@@ -373,6 +373,8 @@ def create_app(
     auth_rate_limiter: AuthRateLimiter | None = None,
     state_backend: str | None = None,
     hosted: bool | None = None,
+    connection_vault: Any = None,
+    modal_provider: Any = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -517,6 +519,9 @@ def create_app(
     app.include_router(api_v1_router)  # empty shell until P2-D (SOR-64)
     app.include_router(api_v2_router)  # Session-first facade (SOR-256)
     app.include_router(hosted_auth_router)
+    from control.hosted_routes import router as hosted_router
+
+    app.include_router(hosted_router)
     app.state.plane = plane
     app.state.hosted_mode = hosted
     app.state.database_records = database_records
@@ -685,6 +690,27 @@ def create_app(
         email_sender = MockEmailSender() if email_mode == "mock" else UnconfiguredEmailSender()
     app.state.hosted_auth = HostedAuthService(
         app.state.auth_store, email_sender, limiter=auth_rate_limiter
+    )
+    from control.connections import ConnectionStore, SecretVault
+    from control.modal_connection import (
+        FakeModalProvider,
+        ModalConnectionService,
+        UnconfiguredModalProvider,
+    )
+
+    app.state.connections = ConnectionStore(
+        app.state.auth_store,
+        connection_vault if connection_vault is not None else SecretVault.from_env(),
+    )
+    app.state.modal_connections = ModalConnectionService(
+        app.state.connections,
+        modal_provider
+        if modal_provider is not None
+        else (
+            FakeModalProvider()
+            if os.environ.get("SBX_CONNECTIONS_MODE") == "mock"
+            else UnconfiguredModalProvider()
+        ),
     )
     configure_v1_bootstrap(app)
 

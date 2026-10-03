@@ -79,4 +79,24 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         )""",
         "CREATE INDEX control_records_owner_idx ON control_records(namespace, owner)",
     ),
+    (
+        """CREATE TABLE hosted_connections (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            state TEXT NOT NULL,
+            credential_cipher TEXT,
+            metadata TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, provider)
+        )""",
+        """CREATE TABLE connection_authorizations (
+            state_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            expires_at DOUBLE PRECISION NOT NULL,
+            consumed_at TEXT
+        )""",
+    ),
 )

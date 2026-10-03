@@ -226,6 +226,8 @@ def test_concurrent_schema_initialization_is_idempotent(tmp_path):
         "email_verification_challenges",
         "auth_rate_limits",
         "control_records",
+        "hosted_connections",
+        "connection_authorizations",
     }
 
 

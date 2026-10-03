@@ -8,9 +8,14 @@ import {
 import { demoMode, demoModels, providerNames } from "./demo";
 import type { ProviderInfo, IntegrationStatus } from "../api/types";
 import { Icon } from "./Icon";
+import { hostedMode } from "../hosted/api";
+import { HostedIntegrations } from "../hosted/Integrations";
 
 function commandArgument(value:string) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
 export function Integrations() {
+  return hostedMode ? <HostedIntegrations /> : <OperatorIntegrations />;
+}
+function OperatorIntegrations() {
   const api = useApi();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [githubState, setGithubState] = useState<IntegrationStatus["github"]>();

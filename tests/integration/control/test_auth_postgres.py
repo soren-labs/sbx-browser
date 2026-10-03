@@ -260,3 +260,22 @@ def test_postgres_business_state_and_owner_survive_database_restart(postgres):
     assert restored.get("connections", "pg-connection", owner=user.id) == {"status": "connected"}
     assert restored.get("connections", "pg-connection", owner="other") is None
     assert len(PostgresWorkflowStore(restored).list_workflow(user.id, "pg-workflow")) == 1
+
+
+def test_postgres_modal_installation_and_cipher_survive_restart(postgres):
+    from control.connections import ConnectionStore, SecretVault
+    from control.modal_connection import FakeModalProvider, ModalConnectionService
+
+    url, stop, start = postgres
+    auth = AuthStore(AuthDatabase(database_url=url))
+    user = auth.create_user(email="pg-modal@example.test")
+    vault = SecretVault(secrets.token_bytes(32))
+    store = ConnectionStore(auth, vault)
+    credential = {"token_id": "REDACTED", "token_secret": secrets.token_urlsafe(32)}
+    store.connect(user.id, "modal", credential)
+    ready = ModalConnectionService(store, FakeModalProvider()).provision(user.id)
+    stop()
+    start()
+    restored = ConnectionStore(AuthStore(AuthDatabase(database_url=url)), vault)
+    assert restored.credentials(restored.get(user.id, "modal")) == credential
+    assert ModalConnectionService(restored, FakeModalProvider()).provision(user.id) == ready
