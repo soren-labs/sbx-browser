@@ -5,12 +5,14 @@ description = "Cursor Cloud Agent-style Codex cloud sessions (browser + control 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0,<26",
     "fastapi>=0.115.0",
     "httpx>=0.27.0",
     # SOR-203: 0.76.0 introduced the autoscaler names the control app uses
     # (scaledown_window / min_containers / buffer_containers).
     "modal>=0.76.0",
     "pydantic>=2.10.0",
+    "psycopg[binary]>=3.2.0,<4",
     # SOR-177: GitHub App authorization mints RS256 JWTs (App → installation
     # token) — [crypto] pulls in cryptography for RSA signing.
     "pyjwt[crypto]>=2.10.0",

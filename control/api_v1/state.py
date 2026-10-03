@@ -163,7 +163,10 @@ class InMemoryScheduler:
 
 
 class InMemoryApiKeyStore:
-    """Generates ``sbx_<hex>`` tokens; stores sha256 hashes only."""
+    """Explicit test/demo helper; production defaults live in control.auth_store.
+
+    Generates ``sbx_<hex>`` tokens; stores sha256 hashes only in process memory.
+    """
 
     def __init__(self) -> None:
         self._keys: dict[str, ApiKey] = {}

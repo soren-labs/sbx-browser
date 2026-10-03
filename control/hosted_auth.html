@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SBX Hosted Alpha · Sign in</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; background: #f5f6fa; color: #192236; margin: 0; }
+    main { max-width: 400px; margin: 10vh auto; padding: 32px; background: white; border-radius: 16px; }
+    label { display: block; margin: 16px 0; }
+    input { display: block; box-sizing: border-box; width: 100%; padding: 12px; margin-top: 6px; }
+    button { cursor: pointer; padding: 12px 18px; margin: 4px 0; }
+    button:disabled { cursor: wait; }
+    [hidden] { display: none; }
+    #status { min-height: 24px; }
+  </style>
+  <script src="/auth/app.js" defer></script>
+</head>
+<body><main>
+  <h1>SBX Hosted Alpha</h1>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="entry">
+    <form id="login">
+      <h2>Sign in</h2>
+      <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+      <button>Sign in</button>
+    </form>
+    <form id="register">
+      <h2>Create an account</h2>
+      <label>Email<input name="email" type="email" autocomplete="email" required maxlength="254"></label>
+      <button>Send verification code</button>
+    </form>
+  </section>
+  <form id="verify" hidden>
+    <h2>Check your email</h2>
+    <p>Enter the six-digit code. It expires in 10 minutes.</p>
+    <label>Verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required maxlength="6"></label>
+    <button>Verify email</button>
+    <button type="button" id="resend">Resend code</button>
+    <button type="button" id="back">Back to sign in</button>
+  </form>
+  <form id="password" hidden>
+    <h2>Set your password</h2>
+    <label>Password (12–128 characters)<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+    <button>Create account</button>
+  </form>
+  <section id="signed-in" hidden>
+    <h2>You're signed in</h2>
+    <p id="identity"></p>
+    <button id="logout">Sign out</button>
+  </section>
+</main></body>
+</html>

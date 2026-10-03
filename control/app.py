@@ -9,6 +9,7 @@ import queue
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,8 @@ from starlette.types import Receive, Scope, Send
 
 from control.api_v1 import router as api_v1_router
 from control.api_v2 import router as api_v2_router
+from control.auth_email import EmailSender, MockEmailSender, UnconfiguredEmailSender
+from control.auth_store import AuthStore, configure_auth
 from control.backend import LocalProcessBackend, SandboxBackend
 from control.config import (
     DEFAULT_MODEL,
@@ -40,6 +43,8 @@ from control.config import (
     env_str,
     lifecycle_config,
 )
+from control.hosted_auth import AuthRateLimiter, HostedAuthService
+from control.hosted_auth_routes import router as hosted_auth_router
 from control.run_activity import FileRunActivityStore, InMemoryRunActivityStore, RunActivityStore
 from control.run_store import RunLedger, RunStore
 from control.sandbox_io import sandbox_env
@@ -123,7 +128,7 @@ class SPAStaticFiles(StaticFiles):
     Content-hashed ``assets/*`` cache immutably; everything else revalidates.
     """
 
-    _API_PREFIXES = ("v1", "v2", "api", ".well-known")
+    _API_PREFIXES = ("v1", "v2", "api", "auth", ".well-known")
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
@@ -363,6 +368,9 @@ def create_app(
     workflow_store: WorkflowStore | None = None,
     task_store: Any | None = None,
     revision_store: Any | None = None,
+    auth_store: AuthStore | None = None,
+    email_sender: EmailSender | None = None,
+    auth_rate_limiter: AuthRateLimiter | None = None,
     runner_cmd: list[str] | None = None,
     basic_user: str | None = None,
     basic_password: str | None = None,
@@ -427,9 +435,30 @@ def create_app(
         handoffs=handoffs,
     )
 
-    app = FastAPI(title="sbx-control", version="0.1.1")
+    credential_refresher_factory: Callable[[], Any] | None = None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Construction stays lazy for the import-time app, but the server
+        # cannot serve even bootstrap /v1/me until durable auth is ready.
+        # Run bounded, synchronous initialization before starting the refresher
+        # or yielding readiness; startup needs no thread-pool round trip.
+        app.state.auth_store.database.initialize()
+        refresher = credential_refresher_factory() if credential_refresher_factory else None
+        if refresher is not None:
+            plane.credential_refresher = refresher
+        try:
+            if refresher is not None:
+                refresher.start()
+            yield
+        finally:
+            if refresher is not None:
+                refresher.stop()
+
+    app = FastAPI(title="sbx-control", version="0.1.1", lifespan=lifespan)
     app.include_router(api_v1_router)  # empty shell until P2-D (SOR-64)
     app.include_router(api_v2_router)  # Session-first facade (SOR-256)
+    app.include_router(hosted_auth_router)
     app.state.plane = plane
     app.state.run_store = run_store
     app.state.run_ledger = plane.run_ledger
@@ -570,10 +599,23 @@ def create_app(
     app.state.basic_password = basic_password
     app.state.keepalive_s = keepalive
 
-    # P2.1 real-gate wiring is opt-in via a Modal Secret. Local/tests without
-    # SBX_V1_BOOTSTRAP_KEY keep the existing lazy in-memory /v1 defaults.
+    # Product credentials always use durable storage. The operator bootstrap
+    # Secret adds a separate credential overlay and provider account seeding.
     from control.api_v1.bootstrap import configure_v1_bootstrap
 
+    configure_auth(app, auth=auth_store)
+    if email_sender is None:
+        # Mock delivery is explicit on Modal; local dev uses it by default.
+        # Until a production adapter is configured, cloud registration fails closed.
+        email_mode = os.environ.get(
+            "SBX_AUTH_EMAIL_MODE", "disabled" if backend_kind == "modal" else "mock"
+        )
+        if email_mode not in {"mock", "disabled"}:
+            raise ValueError("SBX_AUTH_EMAIL_MODE must be mock or disabled")
+        email_sender = MockEmailSender() if email_mode == "mock" else UnconfiguredEmailSender()
+    app.state.hosted_auth = HostedAuthService(
+        app.state.auth_store, email_sender, limiter=auth_rate_limiter
+    )
     configure_v1_bootstrap(app)
 
     def reserve_recovery(rec: SessionRecord) -> Callable[[bool], None]:
@@ -649,15 +691,17 @@ def create_app(
         # Proactive OAuth refresh: a per-account claim + the official CLI's
         # own refresh path inside a throwaway sandbox, committed via the
         # SOR-147 CAS write-back (store blob + managed Secret).
-        plane.credential_refresher = CredentialRefresher(
-            registry_source=lambda: getattr(app.state, "account_registry", None),
-            backend=backend,
-            runner_cmd=runner_cmd,
-            sync=plane.credential_sync,
-            lifecycle=plane.credential_lifecycle,
-            default_model=getattr(plane, "default_model", None) or "gpt-5.6-luna",
-        )
-        plane.credential_refresher.start()
+        # Each server lifespan owns a fresh worker. Merely constructing an
+        # app (including the import-time app and reaper cron) starts no refresher.
+        def credential_refresher_factory() -> CredentialRefresher:
+            return CredentialRefresher(
+                registry_source=lambda: getattr(app.state, "account_registry", None),
+                backend=backend,
+                runner_cmd=runner_cmd,
+                sync=plane.credential_sync,
+                lifecycle=plane.credential_lifecycle,
+                default_model=getattr(plane, "default_model", None) or "gpt-5.6-luna",
+            )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:

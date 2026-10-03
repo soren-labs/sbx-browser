@@ -113,6 +113,14 @@
     "default": "sbx-v1-bootstrap"
   },
   {
+    "field": "auth_database_secret",
+    "toml": "secrets.auth_database",
+    "environment": [
+      "SBX_AUTH_DATABASE_SECRET_NAME"
+    ],
+    "default": ""
+  },
+  {
     "field": "image_codex",
     "toml": "images.codex",
     "environment": [

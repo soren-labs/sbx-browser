@@ -51,6 +51,8 @@ CONTROL_IMAGE = (
         # GitHub App JWT signing (control.github_app) needs PyJWT's crypto
         # extra for RS256 — same constraint as pyproject.toml.
         "pyjwt[crypto]>=2.10.0",
+        "psycopg[binary]>=3.2.0,<4",
+        "argon2-cffi>=25.1.0,<26",
     )
     # SOR-211 + SOR-266: ship the V2 Session Console build (``console/dist``)
     # with the control plane — the deployed app's URL serves it at "/" on
@@ -72,6 +74,16 @@ CONTROL_IMAGE = (
         ignore=lambda p: (
             "node_modules" in p.parts or "test-results" in p.parts or "playwright-report" in p.parts
         ),
+    )
+    .add_local_file(
+        Path(__file__).with_name("hosted_auth.html"),
+        remote_path="/root/control/hosted_auth.html",
+        copy=True,
+    )
+    .add_local_file(
+        Path(__file__).with_name("hosted_auth.js"),
+        remote_path="/root/control/hosted_auth.js",
+        copy=True,
     )
     .add_local_python_source("runtime")
 )

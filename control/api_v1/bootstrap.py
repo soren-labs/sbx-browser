@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from control.accounts import PersistentAccountRegistry, select_store
-from control.api_v1.state import InMemoryApiKeyStore
+from control.auth_store import BootstrapApiKeyStore, configure_auth
 from control.config import account_secret_prefix, env_int, selected_providers
 from control.ports import Account
 from control.scheduler import AccountScheduler, session_running_source
@@ -248,7 +248,9 @@ def configure_v1_bootstrap(app: Any) -> bool:
     """Seed the P2 production gate from env; return whether it was enabled.
 
     The bearer plaintext is never attached to app state. Only its hash enters
-    ``InMemoryApiKeyStore``. Account credentials stay in the per-account
+    an operator-only overlay over the durable product key store. No User is
+    created and bootstrap rotation cannot leave old product keys behind.
+    Account credentials stay in the per-account
     Modal Secrets referenced by name (``sbx-acct-<account_id>``) or in the
     registry's credential-blob store; the seeded codex account carries no
     Secret name so sandboxes keep the default ``CODEX_AUTH_JSON`` credential
@@ -258,9 +260,11 @@ def configure_v1_bootstrap(app: Any) -> bool:
     if not token:
         return False
 
-    key_store = InMemoryApiKeyStore()
-    key_store.seed(token, label="p2.1-gate", scopes=("agents", "admin"))
-    app.state.api_key_store = key_store
+    configure_auth(app)
+    key_store = app.state.api_key_store
+    if isinstance(key_store, BootstrapApiKeyStore):
+        key_store = key_store.store
+    app.state.api_key_store = BootstrapApiKeyStore(key_store, token)
 
     registry = PersistentAccountRegistry(select_store())
     created_at = datetime.now(UTC).isoformat()

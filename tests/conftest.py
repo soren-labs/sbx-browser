@@ -58,6 +58,9 @@ _CLOUD_KEYS = frozenset(
         "GITHUB_TOKEN",
         # Control-plane secrets and credential-forwarding triggers.
         "SBX_V1_BOOTSTRAP_KEY",
+        "DATABASE_URL",
+        "SBX_AUTH_DB_PATH",
+        "SBX_AUTH_DATABASE_SECRET_NAME",
         "SBX_GITHUB_EPHEMERAL",
         "SBX_GITHUB_SECRET_NAME",
         # SOR-177: ambient GitHub App identity/key material must never leak

@@ -247,6 +247,12 @@ def degraded_providers(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
     return tuple(p.strip() for p in raw.split(",") if p.strip())
 
 
+def validate_auth_database_secret(auth_secret: str, bootstrap_secret: str) -> None:
+    """Bootstrap rotation replaces its Secret, so it cannot also hold the DB URL."""
+    if auth_secret and auth_secret.strip() == bootstrap_secret.strip():
+        raise ValueError("auth database Secret must differ from the bootstrap Secret")
+
+
 def app_secret_names(env: Mapping[str, str] | None = None) -> list[str]:
     """Secrets the control app mounts at deploy time (``control/modal_app.py``).
 
@@ -257,6 +263,10 @@ def app_secret_names(env: Mapping[str, str] | None = None) -> list[str]:
     the reason for the degrade.
     """
     env = os.environ if env is None else env
+    validate_auth_database_secret(
+        env.get("SBX_AUTH_DATABASE_SECRET_NAME") or "",
+        env.get("SBX_V1_BOOTSTRAP_SECRET_NAME") or V1_BOOTSTRAP_SECRET_NAME,
+    )
     names = [
         env.get("SBX_BASIC_SECRET_NAME") or BASIC_SECRET_NAME,
         env.get("SBX_V1_BOOTSTRAP_SECRET_NAME") or V1_BOOTSTRAP_SECRET_NAME,
@@ -280,6 +290,11 @@ def app_secret_names(env: Mapping[str, str] | None = None) -> list[str]:
     github_app_secret = env.get("SBX_GITHUB_APP_SECRET_NAME")
     if github_app_secret:
         names.append(github_app_secret)
+    # DATABASE_URL is secret material. Mount it by name rather than baking a
+    # database password into deployment env/image metadata.
+    auth_database_secret = env.get("SBX_AUTH_DATABASE_SECRET_NAME")
+    if auth_database_secret:
+        names.append(auth_database_secret)
     return names
 
 
@@ -328,6 +343,7 @@ REMOTE_ENV_KEYS: tuple[str, ...] = (
     "SBX_CODEX_SECRET_NAME",
     "SBX_BASIC_SECRET_NAME",
     "SBX_V1_BOOTSTRAP_SECRET_NAME",
+    "SBX_AUTH_DATABASE_SECRET_NAME",
     "SBX_ACCOUNT_SECRET_PREFIX",
     "SBX_PROVIDERS",
     "SBX_MAX_CONCURRENT",
